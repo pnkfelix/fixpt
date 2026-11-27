@@ -29,6 +29,11 @@ const S_COMPILER: usize = 2;
 /// committed, by name, its form's text, newest first.
 const S_TEXTS: usize = 3;
 
+thread_local! {
+    /// The standard bindings' names, as a checker written in Rust has them.
+    static STANDARD_NAMES: std::cell::OnceCell<Vec<String>> = const { std::cell::OnceCell::new() };
+}
+
 /// The conductor's entry that makes a session's front end, and the fields
 /// of what it makes, from 1: a global made, a step, whether re-runs wait,
 /// whether reading a global is an effect, a global's type and users.
@@ -38,6 +43,8 @@ const E_STEP: usize = 4;
 const E_DEFER: usize = 5;
 const E_GLOBALS_EFFECTS: usize = 6;
 const E_REDEFINES: usize = 7;
+/// The standard bindings' names, which a file's macro may name, given it.
+const E_NAMES: usize = 10;
 const E_RUNS: usize = 8;
 
 /// How `session-step` checks: the first step, checked alone; more, kept;
@@ -146,6 +153,19 @@ fn front_end(rt: &mut Runtime, base: usize, evaluated: bool) -> Result<Result<Va
     rt.heap.obj_set(s, S_COMPILER, fe);
     call(rt, base, E_GLOBALS_EFFECTS, &[Value::FALSE])?;
     call(rt, base, E_DEFER, &[Value::TRUE])?;
+    // So that a file a step imports macros from may name them, as a
+    // program's may (`import-with-syntax`).
+    let names = STANDARD_NAMES.with(|n| n.get_or_init(|| crate::check::Checker::new().standard_names()).clone());
+    let mark = rt.heap.push_root(Value::NULL);
+    for n in names.iter().rev() {
+        let sym = rt.heap.intern(n);
+        let rest = rt.heap.root_at(mark);
+        let l = rt.heap.cons(sym, rest);
+        rt.heap.set_root_at(mark, l);
+    }
+    let names = rt.heap.root_at(mark);
+    rt.heap.pop_roots_to(mark);
+    call(rt, base, E_NAMES, &[names])?;
     let name = rt.heap.intern("stage-module");
     let cell = call(rt, base, E_GLOBAL, &[name])?;
     let m = rt.heap.obj_ref(rt.heap.root_at(base), S_MODULE);
@@ -392,6 +412,9 @@ pub(crate) fn check(rt: &mut Runtime, base: usize, staged: Value, given: Value) 
     if let Err(refused) = loaded? {
         return Ok(refused);
     }
+    if let Some(name) = crate::sessions::syntax_name(rt, code) {
+        return syntax_pending(rt, base, &name, &code_text);
+    }
     if is_definition(rt, code) {
         return check_define(rt, base, code, &code_text);
     }
@@ -404,6 +427,40 @@ pub(crate) fn check(rt: &mut Runtime, base: usize, staged: Value, given: Value) 
             Ok(sum(rt, "ok", p))
         }
         Err(refused) => Ok(refused),
+    }
+}
+
+/// A step that defines syntax, `text`, defining `name`: its form tried, so
+/// that a macro refused is refused here; pending, the syntax the session's
+/// only once committed (`sessions::syntax_form`).
+fn syntax_pending(rt: &mut Runtime, base: usize, name: &str, text: &str) -> Result<Value, String> {
+    let form = crate::sessions::syntax_form(&imported(rt, base, name, text));
+    let global = crate::sessions::syntax_global(&form).trim_start_matches("(define ").split(' ').next().unwrap_or("").to_string();
+    if let Err(refused) = step(rt, base, &Wrapped::of(String::new(), &form, "\n", &form, 0), TRY, &global, false)? {
+        return Ok(refused);
+    }
+    let d = crate::sessions::pending(rt, base, generation(rt, base), name, "syntax", &form, None);
+    let d = sum(rt, "definition", d);
+    Ok(sum(rt, "ok", d))
+}
+
+/// An `import-with-syntax` of `m`, `text`, a name a committed definition
+/// loaded a file into (`SESSION_LOADS`): the file loaded again, a module
+/// of the same path, so the same module, under a name of its own, which the
+/// import names instead. So the import's text loads the file, which the
+/// step's files then hold (`step_loads`), and the evaluator's (which reads
+/// a session's syntax before each text, `with_syntax`). Any other, as it is.
+fn imported(rt: &Runtime, base: usize, m: &str, text: &str) -> String {
+    let head = format!("(import-with-syntax {} ", fixpt_read::escape_symbol(m));
+    let loads = rt.heap.list_to_vec(rt.heap.obj_ref(rt.heap.root_at(base), fixpt_runtime::prim::SESSION_LOADS)).unwrap_or_default();
+    let path = loads.iter().find(|e| self::text(rt, rt.heap.car(**e)) == m).map(|e| self::text(rt, rt.heap.cdr(*e)));
+    match path {
+        Some(p) if text.starts_with(&head) => {
+            let hidden = format!("%import-{}", crate::sessions::syntax_number());
+            let p = p.replace('\\', "\\\\").replace('"', "\\\"");
+            format!("(define {hidden} (load-module \"{p}\"))\n(import-with-syntax {hidden} {}", &text[head.len()..])
+        }
+        _ => text.to_string(),
     }
 }
 
@@ -529,8 +586,13 @@ pub(crate) fn ready(rt: &mut Runtime, base: usize, d: Value, decision: &str, eva
     });
     // What the evaluator runs: the form; by rep, the form without its type,
     // checked already, which the evaluator does not check (nor read again).
+    let syntax = text(rt, rt.heap.obj_ref(rt.heap.root_at(mark), crate::sessions::P_TYPE)) == "syntax";
+    let load_def = crate::sessions::load_definition(&form);
     let run_form = match &by_rep {
         Some((_, checked)) => checked.replacen(" %stage-type ", " ", 1),
+        // The evaluator reads a session's syntax before each text
+        // (`with_syntax`), so of a syntax step's form it runs the rest.
+        None if syntax => crate::sessions::syntax_global(&form).to_string(),
         None => form.clone(),
     };
     let made = match (evaluated, by_rep) {
@@ -545,10 +607,26 @@ pub(crate) fn ready(rt: &mut Runtime, base: usize, d: Value, decision: &str, eva
     }
     let d = rt.heap.root_at(mark);
     rt.heap.pop_roots_to(mark);
+    // A load's definition committed: what an `import-with-syntax` reads.
+    let d = match (&made, &load_def) {
+        (Ok(Ok(_)), Some((m, p))) => {
+            let at = rt.heap.push_root(d);
+            note_load(rt, base, m, p);
+            let d = rt.heap.root_at(at);
+            rt.heap.pop_roots_to(at);
+            d
+        }
+        _ => d,
+    };
     if evaluated {
         return match made? {
             Ok(_) => {
                 rt.heap.obj_set(d, crate::sessions::P_USED, Value::TRUE);
+                if syntax {
+                    let at = rt.heap.push_root(d);
+                    note_syntax(rt, base, &name, &form[..form.len() - crate::sessions::syntax_global(&form).len()]);
+                    rt.heap.pop_roots_to(at);
+                }
                 let g = generation(rt, base);
                 set_generation(rt, base, g + 1);
                 run_texts(rt, base, &name, &run_form)
@@ -567,6 +645,55 @@ pub(crate) fn ready(rt: &mut Runtime, base: usize, d: Value, decision: &str, eva
         }
         Err(refused) => Ok(refused),
     }
+}
+
+/// The syntax `text` the session at `base` committed, defining `name`, kept
+/// for the evaluator, in place of what defined `name` before.
+fn note_syntax(rt: &mut Runtime, base: usize, name: &str, text: &str) {
+    use fixpt_runtime::prim::SESSION_SYNTAX;
+    let kept = rt.heap.list_to_vec(rt.heap.obj_ref(rt.heap.root_at(base), SESSION_SYNTAX)).unwrap_or_default();
+    let mut entries: Vec<(String, String)> = kept.iter().map(|e| (self::text(rt, rt.heap.car(*e)), self::text(rt, rt.heap.cdr(*e)))).filter(|(n, _)| n != name).collect();
+    entries.insert(0, (name.to_string(), text.trim_end().to_string()));
+    let mark = rt.heap.push_root(Value::NULL);
+    for (n, t) in entries.iter().rev() {
+        let n = rt.heap.make_string(n);
+        rt.heap.push_root(n);
+        let t = rt.heap.make_string(t);
+        let n = rt.heap.root_at(mark + 1);
+        rt.heap.pop_roots_to(mark + 1);
+        let e = rt.heap.cons(n, t);
+        let l = rt.heap.root_at(mark);
+        let l = rt.heap.cons(e, l);
+        rt.heap.set_root_at(mark, l);
+    }
+    let l = rt.heap.root_at(mark);
+    rt.heap.pop_roots_to(mark);
+    let s = rt.heap.root_at(base);
+    rt.heap.obj_set(s, SESSION_SYNTAX, l);
+}
+
+/// A definition committed of `m` by a load of `path` (`SESSION_LOADS`).
+fn note_load(rt: &mut Runtime, base: usize, m: &str, path: &str) {
+    use fixpt_runtime::prim::SESSION_LOADS;
+    let m = rt.heap.make_string(m);
+    let at = rt.heap.push_root(m);
+    let p = rt.heap.make_string(path);
+    let e = rt.heap.cons(rt.heap.root_at(at), p);
+    let l = rt.heap.obj_ref(rt.heap.root_at(base), SESSION_LOADS);
+    let l = rt.heap.cons(e, l);
+    rt.heap.pop_roots_to(at);
+    let s = rt.heap.root_at(base);
+    rt.heap.obj_set(s, SESSION_LOADS, l);
+}
+
+/// `t`, a text the evaluator runs, after the session's syntax, oldest
+/// first: the evaluator reads each text alone, in no session's state, so
+/// that it reads with the session's macros only so.
+fn with_syntax(rt: &Runtime, base: usize, t: &str) -> String {
+    let kept = rt.heap.list_to_vec(rt.heap.obj_ref(rt.heap.root_at(base), fixpt_runtime::prim::SESSION_SYNTAX)).unwrap_or_default();
+    let mut out: String = kept.iter().rev().map(|e| format!("{}\n", text(rt, rt.heap.cdr(*e)))).collect();
+    out.push_str(t);
+    out
 }
 
 /// `text` run among the seeds, after those there.
@@ -644,6 +771,7 @@ fn run_texts(rt: &mut Runtime, base: usize, name: &str, form: &str) -> Result<Va
         rt.heap.obj_set(s, S_TEXTS, t);
     }
     rt.heap.pop_roots_to(mark);
+    let forms: Vec<(String, bool)> = forms.into_iter().map(|(t, k)| (with_syntax(rt, base, &t), k)).collect();
     let list = strings(rt, forms.iter().map(|(t, k)| (t.as_str(), Some(*k))));
     Ok(sum(rt, "run", list))
 }
@@ -678,6 +806,9 @@ pub(crate) fn eval_check(rt: &mut Runtime, base: usize, a: &[Value]) -> Result<V
     if let Err(refused) = loaded? {
         return Ok(refused);
     }
+    if let Some(name) = crate::sessions::syntax_name(rt, code) {
+        return syntax_pending(rt, base, &name, &code_text);
+    }
     if is_definition(rt, code) {
         return check_define(rt, base, code, &code_text);
     }
@@ -686,6 +817,7 @@ pub(crate) fn eval_check(rt: &mut Runtime, base: usize, a: &[Value]) -> Result<V
         Ok(_) => {
             let mut texts = take_seeds(rt, base);
             texts.push(w.whole.clone());
+            let texts: Vec<String> = texts.iter().map(|t| with_syntax(rt, base, t)).collect();
             let list = strings(rt, texts.iter().map(|t| (t.as_str(), None)));
             Ok(sum(rt, "run", list))
         }

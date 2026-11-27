@@ -760,12 +760,12 @@
                    (registers bool) (rep (bytevectorof @t))
                    (named (listof (productof (1 symbol) (2 (bytevectorof @t))) acyclic))
                    (mode int) (given loads-given))
-            ;; Read with the types it is checked against (`with-reps`); the
-            ;; files its text loads, as given (a phase-1 form's; none else).
+            ;; Read with the types it is checked against (`with-reps`), the
+            ;; macros the session's state has; the files its text loads, given.
             (let* ((s0 (if (= how 0) (begun standard) (get step-state)))
                    (s ((with readings with-reps) s0 rep named)))
               (begin
-               (if (= how 0) (set step-state s0) #u)
+               (if (= how 0) (set step-state s0) #u) ((with parser-top macros-inherit!) s s0)
                ((with check-program set-step-named!) named)
                (let ((out (session-step-of standard mode s whole k len how name make deferred
                                            native registers rep (step-loaded given))))
@@ -933,9 +933,9 @@
                ;; And what the last step runs, by name (a session on the
                ;; evaluator, which runs their texts).
                (runs (extract fe checked-run-names))
-               ;; And a name's global, in a list, if it has one: what a
-               ;; phase-1 namespace's definition made (`phase1.rs`).
-               (cell (extract fe compile-global-cell))))))
+               ;; And a name's global, in a list, if it has one: what a phase-1
+               ;; namespace's definition made (`phase1.rs`); and the names a file's macro may name.
+               (cell (extract fe compile-global-cell)) (names (extract fe standard-names!))))))
 
 (define parse-program (extract front-end-entries parse-program))
 (define read-text-at (extract front-end-entries read-text-at))

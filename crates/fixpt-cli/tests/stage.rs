@@ -169,6 +169,20 @@ fn a_sessions_steps_load_files() {
     }
 }
 
+/// A session's macros (`programs/stage/session-macros.fx`): a
+/// `define-syntax` step, pending, then committed, which the steps after
+/// read with, a redefinition the new one after; and a file's macros,
+/// imported from a module a step loaded, only those named.
+#[test]
+fn a_sessions_steps_define_syntax() {
+    let want = "defined twice\n42\ndefined four\n6\ndefined twice\n20\ndefined kit\ndefined kit\n15\nrefused: unbound variable `unless-zero`\n";
+    let runs: Vec<_> = STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run(m, "session-macros.fx")))).collect();
+    for (m, t) in runs {
+        let (status, out, err) = t.join().expect("ran");
+        assert_eq!((status, out.as_str()), (Some(0), want), "{m}: {err}");
+    }
+}
+
 /// A process stages code while another runs, at tiny time slices: the
 /// checker is not the program, and no poll in it switches to the program's
 /// tasks (`TODO.md` §187: on native code, it ran them on a machine that

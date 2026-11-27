@@ -3322,7 +3322,7 @@ prims! {
     // (`fixpt-fx26`'s `sessions26.rs`).
     "%fx26-make-session", 1, Some(1), simple!(|rt, a| {
         let n = SESSIONS_MADE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Ok(rt.heap.vector_from(&[a[0], Value::fixnum(-1), Value::FALSE, Value::FALSE, Value::FALSE, Value::NULL, Value::fixnum(n as i64), Value::NULL]))
+        Ok(rt.heap.vector_from(&[a[0], Value::fixnum(-1), Value::FALSE, Value::FALSE, Value::FALSE, Value::NULL, Value::fixnum(n as i64), Value::NULL, Value::NULL, Value::NULL]))
     });
     "%fx26-session-check", 3, Some(3), reenters!(|rt, a| session_op(rt, "check", a));
     "%fx26-session-redefines", 2, Some(2), reenters!(|rt, a| session_op(rt, "redefines", a));
@@ -3668,6 +3668,12 @@ pub const SESSION_NUMBER: usize = 6;
 /// The keys of the files whose modules the evaluator has made in it
 /// (`fx-ast-eval`, `%fx26-session-eval-loads`).
 pub const SESSION_EVAL_MADE: usize = 7;
+/// Its macros committed, each `(name . text)`, newest first: what the
+/// evaluator reads before each of its texts (`fx-ast-eval`).
+pub const SESSION_SYNTAX: usize = 8;
+/// Its definitions committed of a name by a load, `(define m (load-module
+/// "path"))`, each `(m . path)`: what an `import-with-syntax` of `m` reads.
+pub const SESSION_LOADS: usize = 9;
 
 /// How many sessions have been made, each its number.
 static SESSIONS_MADE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);

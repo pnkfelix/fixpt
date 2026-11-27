@@ -64,7 +64,20 @@
         made-syntax-taken! global-now?
         syntax-names imports-syntax? globals! global-before? macro? later-macro-site def-envs-given
         file-scope-begin! file-scope-end! source-of for-syntax? for-syntax! key-dir macro-relevant
-        relevant-after loads)
+        relevant-after loads by-state state-at)
+;; State `s` given the macros, loads and globals state `from` has, if it has
+;; none of its own: a session's step, read in its session's state with the
+;; types it is checked against folded in (`with-reps`), sees what the steps
+;; before it defined.
+(define macros-inherit! (->* (int int) unit)
+  (lambda (s from)
+    (let ((at (state-at from (get by-state))))
+      (if (or (null? at) (= s from) (not (null? (state-at s (get by-state)))))
+          #u
+          (let ((x (car at)))
+            (set by-state (cons (tuple s (extract x 2) (extract x 3) (extract x 4) (extract x 5)
+                                       (extract x 6) (extract x 7))
+                                (get by-state))))))))
 ;; `(define name type expression)` or `(define name expression)`; for a
 ;; `define*` (`star?`), the type's list holds the head too.
 (define parse-define (->* (syn bool) top)

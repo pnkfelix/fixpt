@@ -153,7 +153,7 @@ pub fn op(rt: &mut Runtime, op: &str, a: &[Value]) -> Result<Value, String> {
 }
 
 fn is_session(rt: &Runtime, s: Value) -> bool {
-    rt.heap.is_a(s, fixpt_heap::ObjType::Vector) && rt.heap.obj_len(s) == 1 + fixpt_runtime::prim::SESSION_EVAL_MADE
+    rt.heap.is_a(s, fixpt_heap::ObjType::Vector) && rt.heap.obj_len(s) == 1 + fixpt_runtime::prim::SESSION_LOADS
 }
 
 pub(crate) fn sum(rt: &mut Runtime, tag: &str, v: Value) -> Value {
@@ -360,6 +360,50 @@ fn make_loads(rt: &mut Runtime, state: &mut State, text: &str) -> Result<(), Val
     Ok(())
 }
 
+/// The name a step that defines syntax defines, if `code` is one:
+/// `(define-syntax name …)` or `(define-syntax-rec name …)`, the name; an
+/// `(import-with-syntax m …)`, the module's.
+pub(crate) fn syntax_name(rt: &Runtime, code: Value) -> Option<String> {
+    let items = rt.heap.list_to_vec(code)?;
+    let sym = |v: Value| rt.heap.is_a(v, fixpt_heap::ObjType::Symbol).then(|| rt.heap.symbol_name(v));
+    let head = sym(*items.first()?)?;
+    matches!(head.as_str(), "define-syntax" | "define-syntax-rec" | "import-with-syntax").then(|| sym(*items.get(1)?)).flatten()
+}
+
+/// The name and the path of a definition of a name by a load, if `form`
+/// (its text) is one: `(define m (load-module "path"))`, a type or not.
+pub(crate) fn load_definition(form: &str) -> Option<(String, String)> {
+    let mut interner = fixpt_read::Interner::default();
+    let read = fixpt_read::Reader::new(form, FileId(0), fixpt_read::SyntaxProfile::FX91, &mut interner).read_all().ok()?;
+    let items = read.first()?.as_proper_list()?;
+    let name = |x: &fixpt_read::Syntax| x.as_symbol().map(|s| interner.name(s).to_string());
+    let init = items.last()?.as_proper_list()?;
+    let ok = (items.len() == 3 || items.len() == 4) && name(&items[0])? == "define" && init.len() == 2 && name(&init[0])? == "load-module";
+    ok.then(|| Some((name(&items[1])?, init[1].as_str()?.to_string()))).flatten()
+}
+
+/// How many steps that define syntax have been made, each its form's
+/// global's number.
+static SYNTAX_STEPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A step that defines syntax, `text`, as the definition its commit makes:
+/// the text, then a global of its own, `%syntax-N`, which the commit
+/// defines as any definition's does; reading the form defines the syntax
+/// (the session's macros, which every step after reads with).
+pub(crate) fn syntax_form(text: &str) -> String {
+    format!("{text}\n(define %syntax-{} #u)", syntax_number())
+}
+
+/// A number no syntax step's global has had (`syntax_form`).
+pub(crate) fn syntax_number() -> u64 {
+    SYNTAX_STEPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The part of a syntax step's form after its syntax (`syntax_form`).
+pub(crate) fn syntax_global(form: &str) -> &str {
+    form.rfind("\n(define %syntax-").map_or(form, |i| &form[i + 1..])
+}
+
 /// Whether `code` is a definition, `(define …)`.
 pub(crate) fn is_definition(rt: &Runtime, code: Value) -> bool {
     let head = if code.is_pair() { rt.heap.car(code) } else { Value::NULL };
@@ -377,6 +421,9 @@ fn lower(rt: &mut Runtime, base: usize, staged: Value, given: Value) -> Result<V
         return Ok(crate::stage::no_rep(rt));
     }
     let text = fixpt_runtime::print::write_value(&rt.heap, code);
+    if let Some(name) = syntax_name(rt, code) {
+        return syntax_pending(rt, base, &parts, &name, &text, Mode::Lowered);
+    }
     if is_definition(rt, code) {
         return check_define(rt, base, &parts, code, &text, Mode::Lowered);
     }
@@ -407,6 +454,9 @@ fn check(rt: &mut Runtime, base: usize, staged: Value, given: Value) -> Result<V
         return Ok(crate::stage::no_rep(rt));
     }
     let text = fixpt_runtime::print::write_value(&rt.heap, code);
+    if let Some(name) = syntax_name(rt, code) {
+        return syntax_pending(rt, base, &parts, &name, &text, Mode::Compiled);
+    }
     if is_definition(rt, code) {
         return check_define(rt, base, &parts, code, &text, Mode::Compiled);
     }
@@ -430,6 +480,16 @@ fn datum(rt: &mut Runtime, code: &Code) -> Value {
     let form = crate::sx::Sx::call("begin", code.0.iter().cloned());
     let d = sx_value(rt, &form);
     rt.heap.cons(d, Value::NULL)
+}
+
+/// A step that defines syntax, `text`, defining `name`, pending: its form
+/// read as its commit reads it, so that the syntax is the session's only
+/// once committed (`syntax_form`).
+fn syntax_pending(rt: &mut Runtime, base: usize, against: &Parts, name: &str, text: &str, mode: Mode) -> Result<Value, String> {
+    let generation = seeded(rt, base, against, mode, |_, state| state.generation)?;
+    let d = pending(rt, base, generation, name, "syntax", &syntax_form(text), None);
+    let d = sum(rt, "definition", d);
+    Ok(sum(rt, "ok", d))
 }
 
 /// A definition checked against the session at `base`: `code`, `(define
@@ -714,6 +774,9 @@ fn eval_check(rt: &mut Runtime, base: usize, a: &[Value]) -> Result<Value, Strin
         Ok(_) => return Ok(failed(rt, "unread", "the code is not one whole expression")),
         Err(e) => return Ok(failed(rt, "unread", &e.message)),
     };
+    if let Some(name) = syntax_name(rt, code) {
+        return syntax_pending(rt, base, &parts, &name, &text, Mode::Evaluated);
+    }
     if is_definition(rt, code) {
         return check_define(rt, base, &parts, code, &text, Mode::Evaluated);
     }
