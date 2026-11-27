@@ -9080,7 +9080,24 @@ module's global literally working, and there may be more (grep
 uses `attempt`, `par` and `spawn-process`, on every staging machine
 (`fixpt-cli/tests/stage.rs`).
 
-## 312. A procedural macro in a staged load, in the native convention (found 2026-11-26, measuring staged loads for Heist; urgent: Heist's `sexp.fx` cannot be staged)
+## 312. ~~A procedural macro in a staged load, in the native convention~~ (found 2026-11-26, measuring staged loads for Heist; urgent: Heist's `sexp.fx` cannot be staged; done the same day)
+
+**Done:** not the transformer's run but the file's reading: a staged
+load's files are read by `syn::loads_given`, whose `file_text` makes the
+frame of a file that defines macros where no checker has
+(`Checker::frame_made_for`), defining each procedural macro in the
+transformers' session (`macros/procedural.rs`), whose front end, native,
+was entered on the thread's native machine, held by the program's code
+that called the stage. A session's procedural `define-syntax` failed so
+too. Now the thread keeps a second transformers' session, of a cellular
+front end, made and used only while the native machine runs
+(`fixpt_native::direct::machine_in_use`); the native one as before
+otherwise, so a program's macros cost what they did (0.09 s for the
+repro's program, before and after; making a native front end cellular
+for all, 0.30 s, was not taken). Heist's `sexp.fx` and `buffer.fx` stage
+on both conventions. Test: `procedural_macros_where_staging_runs` on
+every staging machine (`programs/stage/procedural.fx`,
+`loads/swapping.fx`). What follows is the report as found.
 
 A staged `load-module` of a file that defines a procedural macro and uses
 it fails on every machine of the native convention

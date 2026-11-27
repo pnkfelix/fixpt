@@ -643,6 +643,13 @@ pub fn take_thrown() -> Option<(Value, Value)> {
     THROWN.with(|t| t.take())
 }
 
+/// Whether this thread's machine is running native code now, so that no
+/// native call can be made from here (`with_machine`): inside a call-out
+/// from native code.
+pub fn machine_in_use() -> bool {
+    MACHINE.with(|m| m.try_borrow_mut().is_err())
+}
+
 /// `f` of this thread's machine; or why not: no code space for one, or it
 /// is running already (a native call from code a native call called, which
 /// cannot be yet).

@@ -102,6 +102,11 @@ thread_local! {
     /// there (`phase1::run_transformer`). This runtime's front end is its
     /// own, so a definition here, inside a parse of another's, is apart.
     static SESSION: RefCell<Option<(crate::session::Fx26Session, fixpt_hash::HashMap<u64, crate::phase1::Phase1>)>> = RefCell::new(None);
+    /// The same, its front end cellular: for what asks while this thread's
+    /// native machine runs native code (a staged load's, inside a call-out
+    /// from the program's), when the native front end cannot be entered, a
+    /// native call not nesting (`TODO.md` §312). Made only then.
+    static CELLULAR_SESSION: RefCell<Option<(crate::session::Fx26Session, fixpt_hash::HashMap<u64, crate::phase1::Phase1>)>> = RefCell::new(None);
 }
 
 /// A transformer's key in a namespace: its style and text.
@@ -120,8 +125,10 @@ fn with_session<T>(forms: &[crate::phase1::Form], f: impl FnOnce(&mut fixpt_runt
 /// [`with_session`], a phase-1 form refused said with its place.
 fn with_session_refused<T>(forms: &[crate::phase1::Form], f: impl FnOnce(&mut fixpt_runtime::Runtime, &crate::phase1::Phase1) -> Result<T, String>) -> Result<T, crate::phase1::Refused> {
     let refused = |why: String| crate::phase1::Refused { why, at: None };
+    let cellular = fixpt_native::NATIVE_CONVENTION_AVAILABLE && fixpt_native::direct::machine_in_use();
+    let which = if cellular { &CELLULAR_SESSION } else { &SESSION };
     fixpt_runtime::crossing::apart(|| {
-        SESSION.with(|s| {
+        which.with(|s| {
             let mut s = s.borrow_mut();
             if s.is_none() {
                 // Made, it tells the pieces written in FX-26 its own directory
@@ -131,6 +138,10 @@ fn with_session_refused<T>(forms: &[crate::phase1::Form], f: impl FnOnce(&mut fi
                 let made = (|| {
                     let mut made = crate::session::Fx26Session::with_backend(fixpt_engine::Backend::Bytecode).map_err(|e| refused(e.message.to_string()))?;
                     made.strategy = crate::session::Strategy::Cellular;
+                    if cellular {
+                        made.front_end_native = false;
+                        made.native_keeping = None;
+                    }
                     // Its front end loaded and the standard environment read,
                     // which each namespace is made of.
                     made.phase1().map_err(|e| refused(format!("the transformers' namespace: {}", e.message)))?.end(made.scheme.runtime_unrooted());

@@ -196,6 +196,20 @@ fn staged_loads_use_the_schedulers_forms() {
     }
 }
 
+/// Procedural macros where staging runs, inside a call-out from the
+/// program's code (`programs/stage/procedural.fx`): a staged load of a file
+/// that defines one, and a session's step that does, on every machine; in
+/// the native convention the transformers' session one of a cellular front
+/// end then, the thread's native machine held (`TODO.md` §312).
+#[test]
+fn procedural_macros_where_staging_runs() {
+    let runs: Vec<_> = STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run(m, "procedural.fx")))).collect();
+    for (m, t) in runs {
+        let (status, out, err) = t.join().expect("ran");
+        assert_eq!((status, out.as_str()), (Some(0), "10\ndefined flip\n10\n"), "{m}: {err}");
+    }
+}
+
 /// A process stages code while another runs, at tiny time slices: the
 /// checker is not the program, and no poll in it switches to the program's
 /// tasks (`TODO.md` §187: on native code, it ran them on a machine that
