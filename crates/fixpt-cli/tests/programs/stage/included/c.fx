@@ -1,4 +1,5 @@
-(module-parameters ((m-a (load-moduleof "a.fx")) (m-b (load-moduleof "b.fx" m-a))))
+(module-parameters ((m-a (load-moduleof "a.fx") #:unqualified)
+                    (m-b (load-moduleof "b.fx" m-a) #:unqualified)))
 (define-type behaviour (subr spin (pt) string))
 (define shown (ref behaviour @ed) (new (lambda ((p pt)) "old")))
 (hide (define env (module (include m-a) (include m-b))))

@@ -856,13 +856,13 @@ impl Checker {
                 _ => {}
             }
         }
-        // What each module parameter not `qualified` brings.
+        // What each module parameter included brings (`parse::binder_included`).
         for b in forms.first().and_then(|f| crate::parse::module_parameters_of(f, &self.interner)).unwrap_or_default() {
-            if crate::parse::binder_is_kind(&b, &self.interner) {
+            if crate::parse::binder_is_kind(&b, &self.interner) || !crate::parse::binder_included(&b, &self.interner) {
                 continue;
             }
             let listed = b.list();
-            let Some([_, t]) = listed.as_deref() else { continue };
+            let Some([_, t, ..]) = listed.as_deref() else { continue };
             let parts = t.list().unwrap_or_default();
             match (head(self, t).as_deref(), parts.get(1).map(|p| p.view())) {
                 (Some("load-moduleof" | "load-input-moduleof"), Some(crate::heap_syn::V::Str(p))) => {

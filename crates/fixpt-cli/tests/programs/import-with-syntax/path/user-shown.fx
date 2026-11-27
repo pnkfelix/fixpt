@@ -1,5 +1,5 @@
 ;; The same, not in a `hide`: refused, as no importer of this file sees its
 ;; parameter.
-(module-parameters ((env (load-moduleof "env.fx"))))
+(module-parameters ((env (load-moduleof "env.fx") #:unqualified)))
 (import-with-syntax env::m-lib (only make-thing))
 (define one (make-thing (product (n 1))))

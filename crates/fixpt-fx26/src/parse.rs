@@ -3961,6 +3961,12 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         // Its own `load-module`s are from its directory.
         let outer_dir = std::mem::replace(&mut self.base_dir, at.parent().map(|d| d.to_path_buf()));
         let lives = self.lifetimes.len();
+        if let Some(q) = forms.first().and_then(|f| old_qualified(f, &self.interner)) {
+            return Err(at_file(FxError::at(q, OLD_QUALIFIED), self));
+        }
+        if let Some(first) = forms.first() {
+            warn_unmarked(first, path, &text, &self.interner);
+        }
         let made = if input { self.modules_made(&forms) } else { None };
         let r = if input {
             match &forms[..] {
@@ -4030,9 +4036,11 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         }
         let at = first.span();
         let sym = |c: &mut Self, s: &str| Syn::named(at, s, &mut c.interner);
-        // Each included but those marked `qualified`; each a `lambda`'s
-        // parameter, `(m T)`.
-        let included: Vec<&Syn> = modules.iter().filter(|b| !matches!(b.list().as_deref(), Some([_, _, q]) if is_qualified(q, &self.interner))).collect();
+        // Each included but those marked `#:qualified`: with no mark, as
+        // `#:unqualified`, for now (`warn_unmarked`). Each a `lambda`'s
+        // parameter, `(m T)`, its mark dropped (one not a mark kept, so that
+        // the parameter is refused).
+        let included: Vec<&Syn> = modules.iter().filter(|b| binder_included(b, &self.interner)).collect();
         let includes: Vec<Syn> = included
             .into_iter()
             .map(|b| {
@@ -4041,7 +4049,14 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                 Syn::lst(m.span(), vec![sym(self, "include"), m])
             })
             .collect();
-        let modules: Vec<Syn> = modules.iter().map(|b| Syn::lst(b.span(), b.list().as_deref().expect("a binder")[..2].to_vec())).collect();
+        let modules: Vec<Syn> = modules
+            .iter()
+            .map(|b| {
+                let parts = b.list().as_deref().expect("a binder").to_vec();
+                let marked = matches!(&parts[..], [_, _, q] if binder_mark(q, &self.interner).is_some());
+                if marked { Syn::lst(b.span(), parts[..2].to_vec()) } else { b.clone() }
+            })
+            .collect();
         let hide = Syn::lst(at, std::iter::once(sym(self, "hide")).chain(includes).collect());
         let module = Syn::lst(at, [sym(self, "module"), hide].into_iter().chain(rest.iter().cloned()).collect());
         let lambda = Syn::lst(at, vec![sym(self, "lambda"), Syn::lst(at, modules), module]);
@@ -5008,20 +5023,81 @@ pub(crate) fn module_parameters_of(f: &Syn, interner: &fixpt_read::Interner) -> 
 }
 
 /// Whether binder `b` of a `module-parameters` binds a description, `(name
-/// kind)` or `(r region p)`; else it is `(m T)` or `(m T qualified)`, a
-/// module parameter.
+/// kind)` or `(r region p)`; else it is `(m T)`, `(m T #:qualified)` or `(m
+/// T #:unqualified)`, a module parameter. A `(m T qualified)`, the mark's
+/// spelling before keywords, is a module parameter too, which its
+/// `lambda` then refuses (`modules_made`).
 pub(crate) fn binder_is_kind(b: &Syn, interner: &fixpt_read::Interner) -> bool {
     match b.list().as_deref() {
         Some([_, k]) => is_kind_form(k, interner),
-        Some([_, k, q]) => is_kind_form(k, interner) || !is_qualified(q, interner),
+        Some([_, k, q]) => is_kind_form(k, interner) || (binder_mark(q, interner).is_none() && !q.sym().is_some_and(|q| interner.name(q) == "qualified")),
         _ => true,
     }
 }
 
-/// `qualified`, a module parameter's mark that it is not included: its
-/// names are reached by `with` or `import` (Heist's, 2026-10-28).
-fn is_qualified(q: &Syn, interner: &fixpt_read::Interner) -> bool {
-    q.sym().is_some_and(|q| interner.name(q) == "qualified")
+/// Why a `module-parameters` binder's old mark, the symbol `qualified`, is
+/// refused (`old_qualified`; the parser written in FX-26 says it so too).
+pub(crate) const OLD_QUALIFIED: &str = "a module parameter's mark is a keyword now: `#:qualified`, its names reached by `m::name`, `with` or `import`; or `#:unqualified`, its names the file's own, as a parameter with no mark's are for now";
+
+/// Where the first binder of `module-parameters` form `first` marked as
+/// before keywords, `(m T qualified)`, has its mark, if one is.
+pub(crate) fn old_qualified(first: &Syn, interner: &fixpt_read::Interner) -> Option<fixpt_read::Span> {
+    module_parameters_of(first, interner)?.iter().find_map(|b| match b.list().as_deref() {
+        Some([_, _, q]) if q.sym().is_some_and(|s| interner.name(s) == "qualified") => Some(q.span()),
+        _ => None,
+    })
+}
+
+/// Each module parameter of `module-parameters` form `first`, of the file
+/// `path` (as written) of text `text`, that has no mark, warned of, once a
+/// thread each: it is included, as `#:unqualified` says, for now; a future
+/// version will make a parameter with no mark qualified, which will likely
+/// break the file (the user's, 2026-11-26).
+fn warn_unmarked(first: &Syn, path: &str, text: &str, interner: &fixpt_read::Interner) {
+    thread_local! {
+        static SAID: std::cell::RefCell<fixpt_hash::HashSet<String>> = std::cell::RefCell::new(fixpt_hash::HashSet::default());
+    }
+    let Some(binders) = module_parameters_of(first, interner) else { return };
+    for b in &binders {
+        let listed = b.list();
+        let Some([m, t]) = listed.as_deref() else { continue };
+        if is_kind_form(t, interner) {
+            continue;
+        }
+        let name = m.sym().map(|s| interner.name(s).to_string()).unwrap_or_default();
+        let start = m.span().start as usize;
+        let before: String = text.chars().take(start).collect();
+        let line = before.matches('\n').count() + 1;
+        let col = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
+        let said = format!("in `{path}`, {line}:{col}: module parameter `{name}` has no mark, so its names are this file's own, as `#:unqualified` says: write `#:unqualified` to keep them so; a future version will make a parameter with no mark qualified, `#:qualified`, its names reached as `{name}::name`, which will likely break this file");
+        if SAID.with(|s| s.borrow_mut().insert(said.clone())) {
+            eprintln!("fixpt: warning: {said}");
+        }
+    }
+}
+
+/// Whether module parameter `b` (not a kind's binder) is included in its
+/// file's items: with no mark, for now (`warn_unmarked`), or marked
+/// `#:unqualified`. Every reader of a file's parameters asks this.
+pub(crate) fn binder_included(b: &Syn, interner: &fixpt_read::Interner) -> bool {
+    match b.list().as_deref() {
+        Some([_, _]) => true,
+        Some([_, _, q]) => binder_mark(q, interner) == Some(true),
+        _ => false,
+    }
+}
+
+/// A module parameter's mark (the user's, 2026-11-26): `#:qualified`, not
+/// included, its names reached by `with`, `m::name` or `import`, as a
+/// parameter with no mark is; `#:unqualified`, included, each of its names
+/// the file's own (hidden), as every parameter was before. `Some(true)` for
+/// included; none if `q` is no mark.
+fn binder_mark(q: &Syn, interner: &fixpt_read::Interner) -> Option<bool> {
+    match q.view() {
+        V::Keyword(w) if interner.name(w) == "qualified" => Some(false),
+        V::Keyword(w) if interner.name(w) == "unqualified" => Some(true),
+        _ => None,
+    }
 }
 
 fn is_kind_form(k: &Syn, interner: &fixpt_read::Interner) -> bool {

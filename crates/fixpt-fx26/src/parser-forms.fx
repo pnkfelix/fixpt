@@ -457,11 +457,18 @@
     (tagcase b
       (lst (xs d a b2 xpn)
         (cond ((= (len xs) 2) (kind-form? (nth xs 1)))
-              ((= (len xs) 3) (or (kind-form? (nth xs 1)) (not (qualified? (nth xs 2)))))
+              ((= (len xs) 3) (or (kind-form? (nth xs 1))
+                                  (not (or (binder-mark? (nth xs 2)) (qualified? (nth xs 2))))))
               (else #t)))
       (else y #t))))
-;; Whether `q` is `qualified`: a module parameter not included, its names
-;; reached by `with` or `import` (Heist's, 2026-10-28).
+;; Whether `q` is a module parameter's mark (the user's, 2026-11-26):
+;; `#:qualified`, not included, its names reached by `with`, `m::name` or
+;; `import`, as a parameter with no mark is; or `#:unqualified`, included,
+;; its names the file's own, hidden (`binder_mark`).
+(define binder-mark? (->* (syn) bool)
+  (lambda (q) (or (keyword-named? q 'qualified) (keyword-named? q 'unqualified))))
+;; Whether `q` is `qualified`, the mark's spelling before keywords: a module
+;; parameter still, whose `lambda` refuses it (`binder-params`).
 (define qualified? (->* (syn) bool)
   (lambda (q) (tagcase q (atom (d a b xpn) (symbol=? (syn-head q) 'qualified)) (else y #f))))
 ;; The binders of form `f`, if it is `(module-parameters (binder …))`.
@@ -489,7 +496,8 @@
     (cond ((null? bs) nil)
           ((binder-kind? (car bs)) (module-binders-only (cdr bs)))
           (else (cons (car bs) (module-binders-only (cdr bs)))))))
-;; `(include m)` of each module parameter `(m T)`, not `(m T qualified)`.
+;; `(include m)` of each module parameter `(m T #:unqualified)`, and, for
+;; now, each `(m T)` of no mark (`warn_unmarked`).
 (define binder-includes (->* (syns-a int int) syns-a)
   (lambda (bs a b)
     (if (null? bs)
@@ -497,10 +505,10 @@
         (tagcase (car bs)
           (lst (xs d c e xpn)
             (let ((m (car xs)))
-              (if (= (len xs) 3)
-                  (binder-includes (cdr bs) a b)
+              (if (or (= (len xs) 2) (keyword-named? (nth xs 2) 'unqualified))
                   (cons (mk-list (list (mk-symbol "include" a b) m) (syn-start m) (syn-end m))
-                        (binder-includes (cdr bs) a b)))))
+                        (binder-includes (cdr bs) a b))
+                  (binder-includes (cdr bs) a b))))
           (else y (binder-includes (cdr bs) a b))))))
 ;; Each module parameter as a `lambda`'s, `(m T)`.
 (define binder-params (->* (syns-a) syns-a)
@@ -509,7 +517,9 @@
         nil
         (cons (tagcase (car bs)
                 (lst (xs d c e xpn)
-                  (if (= (len xs) 3) (mk-list (list (car xs) (nth xs 1)) c e) (car bs)))
+                  (if (and (= (len xs) 3) (binder-mark? (nth xs 2)))
+                      (mk-list (list (car xs) (nth xs 1)) c e)
+                      (car bs)))
                 (else y (car bs)))
               (binder-params (cdr bs))))))
 ;; A file of module parameters' one expression (`modules_made`):
@@ -560,12 +570,35 @@
 ;; file of module parameters' one is the function of them it makes.
 (define input-items (->* (fails syns-a int int) syns-a)
   (lambda (fail forms0 a b)
+    (cond
+     ((not (null? (old-qualified forms0)))
+      (let ((q (car (old-qualified forms0)))) (fail old-qualified-said (syn-start q) (syn-end q))))
+     (else
     (if (or (takes-modules? forms0) (and (not (null? forms0)) (null? (cdr forms0))))
         (let* ((forms (if (takes-modules? forms0) (the syns-a (list (modules-made forms0))) forms0))
                (one (car forms))
                (item (the syns-a (list (mk-symbol "define" a b) (mk-symbol "input" a b) one))))
           (the syns-a (cons (mk-list item (syn-start one) (syn-end one)) nil)))
-        (fail "a `load-input` file is one expression" a b))))
+        (fail "a `load-input` file is one expression" a b))))))
+;; A `module-parameters` binder's mark as before keywords, the symbol
+;; `qualified`, in a list of one; none if there is none (`old_qualified`).
+(define old-qualified (->* (syns-a) syns-a)
+  (lambda (forms)
+    (letrec ((go (subr (maxeff (read @globals) spin) (syns-a) syns-a)
+                   (lambda (bs)
+                     (if (null? bs)
+                         nil
+                         (tagcase (car bs)
+                           (lst (xs d c e xpn)
+                             (if (and (= (len xs) 3) (qualified? (nth xs 2)))
+                                 (the syns-a (list (nth xs 2)))
+                                 (go (cdr bs))))
+                           (else y (go (cdr bs))))))))
+      (if (null? forms) nil (go (module-binders (car forms)))))))
+(define old-qualified-said string
+  (string-append "a module parameter's mark is a keyword now: `#:qualified`, its names reached "
+                 "by `m::name`, `with` or `import`; or `#:unqualified`, its names the file's "
+                 "own, as a parameter with no mark's are for now"))
 
 ;; Whether `s` mentions the name `n` anywhere, quoted or not.
 (define syn-mentions? (->* (symbol syn) bool)

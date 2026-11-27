@@ -4294,9 +4294,9 @@ impl Aligner<'_> {
             list = Rc::new(STy::Pair(Rc::new(STy::Union(vec![Rc::new(one)])), list));
         }
         let entries = (0..ps.len()).map(|k| ([vec![true], vec![false; k], vec![true]].concat(), Delta::Rib)).collect();
-        // Each module not `qualified` included in the items, as the
-        // checkers make the file (`Checker::modules_made`).
-        let included = ps.iter().enumerate().filter(|(_, p)| !binder_is_kind(p, self.interner) && p.list().is_some_and(|l| l.len() == 2));
+        // Each module included in the items, as the checkers make the file
+        // (`Checker::modules_made`, `parse::binder_included`).
+        let included = ps.iter().enumerate().filter(|(_, p)| !binder_is_kind(p, self.interner) && crate::parse::binder_included(p, self.interner));
         let shapes = included.map(|(k, _)| Ring::Shape([vec![true], vec![false; k], vec![true, true]].concat()));
         let rings = std::iter::once(Ring::Rib(entries)).chain(shapes).collect();
         Rc::new(STy::Export(Rc::new(STy::Pair(list, Rc::new(STy::Nil))), Bind::Cage(rings)))
@@ -5666,7 +5666,7 @@ fn binder_is_kind(b: &Syn, interner: &Interner) -> bool {
     };
     match b.list().as_deref() {
         Some([_, k]) => kind(k),
-        Some([_, k, q]) => kind(k) || !q.sym().is_some_and(|q| interner.name(q) == "qualified"),
+        Some([_, k, q]) => kind(k) || !(matches!(q.view(), crate::heap_syn::V::Keyword(w) if matches!(interner.name(w), "qualified" | "unqualified")) || q.sym().is_some_and(|q| interner.name(q) == "qualified")),
         _ => true,
     }
 }

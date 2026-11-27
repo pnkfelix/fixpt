@@ -425,8 +425,8 @@
   (lambda (a k) (if (= k 0) a (addr-falses (addr+ a #f) (- k 1)))))
 ;; The binding structure of a program's `module-parameters`' list `bs`:
 ;; each a value's binder, its type in the scope of those before it, or a
-;; description's; each module not `qualified` included in the items, as the
-;; checkers make the file (`macros.rs`'s `parameters_sig`).
+;; description's; each module included in the items (`binder-included?`),
+;; as the checkers make the file (`macros.rs`'s `parameters_sig`).
 (define parameters-sig (->* (syn) sty)
   (lambda (bs)
     (let ((ps (proper-items bs)))
@@ -451,21 +451,34 @@
 (define parameter-shapes (->* (syns-a int) rings)
   (lambda (ps k)
     (cond ((null? ps) nil)
-          ((or (binder-is-kind? (car ps)) (not (= (len (proper-items (car ps))) 2)))
+          ((or (binder-is-kind? (car ps)) (not (binder-included? (car ps))))
            (parameter-shapes (cdr ps) (+ k 1)))
           (else (cons (ring-shape (cons #t (addr+ (addr+ (addr-falses nil k) #t) #t)))
                       (parameter-shapes (cdr ps) (+ k 1)))))))
+;; Whether module parameter `b`, not a kind's binder, is included in its
+;; file's items: with no mark, for now, or marked `#:unqualified`
+;; (`parse::binder_included`).
+(define binder-included? (->* (syn) bool)
+  (lambda (b)
+    (let ((parts (proper-items b)))
+      (or (= (len parts) 2) (and (= (len parts) 3) (keyword-is? (nth parts 2) 'unqualified))))))
 ;; Whether module parameter `b` binds a description, `(name kind)` or `(r
-;; region p)`; else it is `(m T)` or `(m T qualified)`, a module
+;; region p)`; else it is `(m T)`, `(m T #:qualified)` or `(m T
+;; #:unqualified)` (or `(m T qualified)`, refused after), a module
 ;; (`parse::binder_is_kind`).
+(define keyword-is? (->* (syn symbol) bool)
+  (lambda (s k)
+    (tagcase s (atom (d a b x) (and (keyword? d) (symbol=? (keyword->symbol d) k))) (else y #f))))
 (define binder-is-kind? (->* (syn) bool)
   (lambda (b)
     (let ((parts (proper-items b)))
       (cond ((= (len parts) 2) (kind-form? (nth parts 1)))
             ((= (len parts) 3)
              (or (kind-form? (nth parts 1))
-                 (not (and (syn-symbol? (nth parts 2)) (string=? (syn-name (nth parts 2))
-                                                         "qualified")))))
+                 (not (or (keyword-is? (nth parts 2) 'qualified)
+                          (keyword-is? (nth parts 2) 'unqualified)
+                          (and (syn-symbol? (nth parts 2))
+                               (string=? (syn-name (nth parts 2)) "qualified"))))))
             (else #t)))))
 (define kind-form? (->* (syn) bool)
   (lambda (k)

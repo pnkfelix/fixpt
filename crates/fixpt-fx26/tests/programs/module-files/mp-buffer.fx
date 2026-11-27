@@ -1,6 +1,6 @@
 ;; A file of a module parameter (Heist's, 2026-10-28): `mp-base.fx`'s names
 ;; its own, hidden; loaded as `((load-module "mp-buffer.fx") m-base)`.
-(module-parameters ((m-base (load-moduleof "mp-base.fx"))))
+(module-parameters ((m-base (load-moduleof "mp-base.fx") #:unqualified)))
 (define tally (ref int @c) (new 0))
 ;; Expressions, run in order as the module is made.
 (set tally (+ (get tally) (twice 5)))

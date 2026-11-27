@@ -397,7 +397,7 @@ fn a_maker_keeps_its_parameters_types_named() {
     std::fs::write(dir.join("a.fx"), "(module-parameters ())\n(define-type ints (listof int acyclic))\n(define none ints nil)\n").expect("written");
     std::fs::write(
         dir.join("b.fx"),
-        "(module-parameters ((m-a (load-moduleof \"a.fx\"))))\n(define both (subr pure ((listof int acyclic) (select m-a ints)) (select m-a ints)) (lambda (x y) y))\n",
+        "(module-parameters ((m-a (load-moduleof \"a.fx\") #:qualified)))\n(define both (subr pure ((listof int acyclic) (select m-a ints)) (select m-a ints)) (lambda (x y) y))\n",
     )
     .expect("written");
     let (ok, out, err) = fixpt(&dir, &["compile-file", "a.fx", "b.fx"], &[]);
@@ -478,7 +478,7 @@ fn a_parameter_chain_importing_macros_compiles_in_its_length() {
     let n = 18;
     std::fs::write(dir.join("macros.fx"), "(define-syntax twice (macro (_ expr) expr) (syntax-rules ((_ e) (let ((x e)) (+ x x)))))\n").expect("written");
     for k in 0..=n {
-        let params: Vec<String> = (0..k).map(|i| format!("(m{i} (load-moduleof \"f{i}.fx\"{}))", (0..i).map(|j| format!(" m{j}")).collect::<String>())).collect();
+        let params: Vec<String> = (0..k).map(|i| format!("(m{i} (load-moduleof \"f{i}.fx\"{}) #:unqualified)", (0..i).map(|j| format!(" m{j}")).collect::<String>())).collect();
         let text = format!("(module-parameters ({}))\n(define mac{k} (load-module \"macros.fx\"))\n(import-with-syntax mac{k})\n(define v{k} int (twice {k}))\n", params.join(" "));
         std::fs::write(dir.join(format!("f{k}.fx")), text).expect("written");
     }

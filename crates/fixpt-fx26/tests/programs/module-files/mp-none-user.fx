@@ -1,3 +1,3 @@
 ;; A file of a module parameter typed by one of no parameters.
-(module-parameters ((m-a (load-moduleof "mp-none.fx"))))
+(module-parameters ((m-a (load-moduleof "mp-none.fx") #:unqualified)))
 (define get-n (subr (read @heap) () int) (lambda () (get n)))
