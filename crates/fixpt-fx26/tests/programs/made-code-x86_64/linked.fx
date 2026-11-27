@@ -6,7 +6,7 @@
 ;;; anything else by `foreign`. So `(square x)` is `(* x x)`. Made from the
 ;;; convention read as data (`fx26:convention.fx`) by the x86_64 encoder
 ;;; written in FX-26. Where this machine runs no native code, the answer
-;;; it would give. `made-code/linked.fx` is this on arm64.
+;;; it would give. `made-code-arm64/linked.fx` is this on arm64.
 (define-convention x86_64-native
   (target x86_64)
   (registers

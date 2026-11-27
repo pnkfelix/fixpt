@@ -3,7 +3,7 @@
 //! program wrote into a bloblet, sealed into the code area and made a
 //! native procedure, called from every machine that runs native code; and
 //! on the one that runs none (the evaluator written in FX-26), the program's
-//! own fallback. arm64's programs are `programs/made-code/`, x86_64's
+//! own fallback. arm64's programs are `programs/made-code-arm64/`, x86_64's
 //! `programs/made-code-x86_64/`, each the other's twin, to the convention
 //! of its machine (`native-arm64.conv`, `native-x86_64.conv`).
 
@@ -12,7 +12,7 @@ use std::process::Command;
 const FIXPT: &str = env!("CARGO_BIN_EXE_fixpt");
 
 /// The programs' directory: this machine's twins.
-const DIR: &str = if cfg!(target_arch = "x86_64") { "made-code-x86_64" } else { "made-code" };
+const DIR: &str = if cfg!(target_arch = "x86_64") { "made-code-x86_64" } else { "made-code-arm64" };
 /// The `target` clause of this machine's convention.
 const TARGET: &str = if cfg!(target_arch = "x86_64") { "\"(target x86_64)\"" } else { "\"(target arm64)\"" };
 
@@ -69,7 +69,7 @@ fn leaves_made_and_run() {
 }
 
 /// A program that declares the convention it makes code to
-/// (`define-convention`, `programs/made-code/declared.fx`): the native
+/// (`define-convention`, `programs/made-code-arm64/declared.fx`): the native
 /// convention, named so, its clauses as the program reads them, and a leaf
 /// that subtracts, made at it.
 #[test]
@@ -81,7 +81,7 @@ fn code_made_to_a_declared_convention() {
 }
 
 /// Typed calls of a made procedure in procedures, in tail position and
-/// not (`programs/made-code/typed-calls.fx`): on the arm64 cellular
+/// not (`programs/made-code-arm64/typed-calls.fx`): on the arm64 cellular
 /// machines a typed tail call of one stopped ("no routine is numbered
 /// 40"), and register code's `invoke` crashed.
 #[test]
@@ -92,7 +92,7 @@ fn typed_calls_of_a_made_procedure() {
     }
 }
 
-/// Code a program makes that is not a leaf (`programs/made-code/
+/// Code a program makes that is not a leaf (`programs/made-code-arm64/
 /// frames.fx`): a frame with its stack map, the stack's limit, a million
 /// pairs by `cons` across collections, fuel and `poll`, and a call of a
 /// procedure it is given, native or not; and made at every depth of a
@@ -118,7 +118,7 @@ fn code_with_a_frame_made_and_run() {
 }
 
 /// Code made by a generator that reads the convention as data
-/// (`programs/made-code/generated.fx`, `fx26:convention.fx`): `frames.fx`'s
+/// (`programs/made-code-arm64/generated.fx`, `fx26:convention.fx`): `frames.fx`'s
 /// procedure, every register, offset, tag and routine's entry taken from
 /// the declaration read as a `convention`. It is word for word (on x86_64,
 /// byte for byte) the code `frames.fx` writes out, and runs as that does.
@@ -157,7 +157,7 @@ fn code_made_from_the_convention_read_as_data() {
 }
 
 /// A primitive reached by made code through a field of its code bloblet,
-/// not by a number (`programs/made-code/linked.fx`): `*`, the standard
+/// not by a number (`programs/made-code-arm64/linked.fx`): `*`, the standard
 /// operation as a value, then a procedure of the program's own, each
 /// called by the code that holds it; a hundred thousand calls, `poll`
 /// among them. Then on two machines with time slices of 3 and a small
@@ -184,7 +184,7 @@ fn a_primitive_reached_through_a_field() {
 }
 
 /// A bloblet made by made code, by the convention's `bloblet` routine
-/// (`programs/made-code/allocated.fx`): its fields stored, twenty thousand
+/// (`programs/made-code-arm64/allocated.fx`): its fields stored, twenty thousand
 /// kept across the collections their making makes, and a size it refuses,
 /// the trap.
 #[test]
@@ -227,7 +227,7 @@ fn both_declarations_read_as_data() {
 }
 
 /// Every procedure's code runs (`docs/research/code-stubs.md`,
-/// `programs/made-code/stubs.fx`): made code declared with
+/// `programs/made-code-arm64/stubs.fx`): made code declared with
 /// `(code-always-runs)` calls what it is given with no test, its code at
 /// its field 2 plus the code distance, native code or a stub that enters
 /// `foreign`. Given a primitive, a continuation, and a closure kept

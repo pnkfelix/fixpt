@@ -2909,7 +2909,7 @@ Still open in `TODO.md` §97; done so far:
   from the word, which `run_routine` took for an error), and register code's
   `invoke` crashed on one (it read the callee's word's twin); now the return
   is made, and `invoke` calls a native closure out to the Rust machine
-  (`programs/made-code/typed-calls.fx`).
+  (`programs/made-code-arm64/typed-calls.fx`).
 - **`(import m name … (type name …) (effect name …))`** (2026-10-15, the
   user's; `docs/fx26.md`, Modules): what a module gives, by name, defined
   where it is, each as `(define x (with m x))`, `(define-type t (select m
@@ -2931,7 +2931,7 @@ Still open in `TODO.md` §97; done so far:
   refused at the first clause that differs (`cv-read`: `ok` or
   `refused`). `cv-native` is fixpt's own. A generator takes a
   `convention` rather than numbers copied out of fixpt. Tests:
-  `programs/made-code/generated.fx`, `frames.fx`'s procedure made from
+  `programs/made-code-arm64/generated.fx`, `frames.fx`'s procedure made from
   the convention by the arm64 encoder written in FX-26, word for word
   the code `frames.fx` writes out, and run on all nine machines
   (`code_made_from_the_convention_read_as_data`);
@@ -2943,7 +2943,7 @@ Still open in `TODO.md` §97; done so far:
   makes, and the code calls it as any procedure; no routine calls a
   primitive by number, and "primitives by name" is no longer to decide
   with kayak (`declared-conventions.md`, "Primitives, through fields").
-  Test: `programs/made-code/linked.fx`, `(* x x)` by `*` in field 0, a
+  Test: `programs/made-code-arm64/linked.fx`, `(* x x)` by `*` in field 0, a
   hundred thousand calls with `poll` among them, then a procedure of the
   program's own, on every machine and stressed. Fixed on the way: the
   bytecode VM's `*` is its primitive object, which native code's
@@ -2958,7 +2958,7 @@ Still open in `TODO.md` §97; done so far:
   makes; for sizes that refuses, the trap (`a primitive failed`). The
   declaration states it, `(makes (kind bloblet) (trailer 1) zeroed)` and
   `(traps-when-refused 3)`, and a `convention` holds it. Test:
-  `programs/made-code/allocated.fx`, `(pack s k)` made from the
+  `programs/made-code-arm64/allocated.fx`, `(pack s k)` made from the
   convention: `s` and `k` stored in the fields, each store marking its
   card; twenty thousand kept across collections; a size of -1 refused;
   on every machine and stressed (`a_bloblet_made_by_the_routine`).

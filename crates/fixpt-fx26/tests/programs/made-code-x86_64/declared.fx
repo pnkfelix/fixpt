@@ -2,7 +2,7 @@
 ;;; declared-conventions.md`), on x86_64: `x86_64-native` names fixpt's
 ;;; native convention there, whose clauses these are, in a program that
 ;;; makes code to it and calls it. Where this machine runs no native code,
-;;; the answer it would give. `made-code/declared.fx` is this on arm64.
+;;; the answer it would give. `made-code-arm64/declared.fx` is this on arm64.
 (define-convention x86_64-native
   (target x86_64)
   (registers

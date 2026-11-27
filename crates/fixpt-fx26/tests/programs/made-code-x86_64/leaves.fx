@@ -2,7 +2,7 @@
 ;;; declared-conventions.md`), on x86_64: a bloblet whose suffix is x86_64
 ;;; machine code, sealed into the code area, made a native procedure at a
 ;;; stated type. Where this machine runs no native code, or runs another
-;;; machine's (`made-code/leaves.fx` is this on arm64), the answers it would
+;;; machine's (`made-code-arm64/leaves.fx` is this on arm64), the answers it would
 ;;; give.
 
 ;; Whether the code this makes runs here: native code, x86_64's.

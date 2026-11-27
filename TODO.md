@@ -2594,12 +2594,12 @@ Design: `docs/research/declared-conventions.md` (its steps are the plan).
 
 Built (2026-10-14), the note's steps 2 and 3: `seal-code`,
 `native-procedure`, `native-code?` and `(io native)`, on all nine
-machines (`programs/made-code/leaves.fx`, `fixpt-cli/tests/made_code.rs`).
+machines (`programs/made-code-arm64/leaves.fx`, `fixpt-cli/tests/made_code.rs`).
 And step 4: `define-convention`, fixpt's declaration generated from its
 constants, both checkers comparing a program's with it
-(`programs/made-code/declared.fx`). And step 5: code that is not a leaf, with `poll` and `cons` routines
-(`programs/made-code/frames.fx`). And step 6: the declaration as data a
-generator reads (`fx26:convention.fx`, `programs/made-code/generated.fx`).
+(`programs/made-code-arm64/declared.fx`). And step 5: code that is not a leaf, with `poll` and `cons` routines
+(`programs/made-code-arm64/frames.fx`). And step 6: the declaration as data a
+generator reads (`fx26:convention.fx`, `programs/made-code-arm64/generated.fx`).
 And on x86_64 (kayak's request, 2026-10-18; CLAUDES_CHOICES.md "Code a
 program makes, on x86_64"): its own declaration, `native-x86_64.conv`,
 which `native-convention` gives there and both checkers compare with, and
@@ -2623,7 +2623,7 @@ Left:
   them, `(native-procedure c v …)`, an FX-26 operation extended, no clause
   added to the contract (`closures` already lays them out). Made code
   making closures as it runs reaches that operation through a field and
-  calls it by `foreign`, as `programs/made-code/linked.fx` calls `*`; it
+  calls it by `foreign`, as `programs/made-code-arm64/linked.fx` calls `*`; it
   reads the captured values by the `closures` clause. Until then a
   generator can convert closures itself (the environment an extra
   argument, a pair of code and environment in a bloblet), which works
@@ -9141,7 +9141,7 @@ off within it), or let a native call nest (the machine's state saved and
 given back around the inner call, as `CALLED_OUT` does for call-outs). Test: the repro, staged and as a session
 step's macro, on every staging machine.
 
-## 313. ~~`made-code/allocated.fx` refused: `pack-code` reads `@heap`~~ (found 2026-11-26, failing on the arm64 Mac since 2026-10-29; done 2026-11-27)
+## 313. ~~`made-code-arm64/allocated.fx` refused: `pack-code` reads `@heap`~~ (found 2026-11-26, failing on the arm64 Mac since 2026-10-29; done 2026-11-27)
 
 **Done: the program was wrong, not the checker.** `pack-code` makes its
 instructions by `append` of lists at `@heap`, and `append` reads them,
@@ -9153,7 +9153,7 @@ say it. Found by bisecting `fixpt check` of the file between `0edd761c`
 (2026-10-15, which wrote it, checks) and `7385b073` (2026-11-01, refused).
 `pack-code` now declares `(read @heap)`, as its x86_64 twin had from the
 start (`made-code-x86_64/allocated.fx`, `makes`); no other arm64 program
-of `made-code/` is refused. Both tests pass.
+of `made-code-arm64/` is refused. Both tests pass.
 
 **Why it went unseen four weeks:** the two directories are twins, each
 run only on its own architecture (`made_code.rs`'s `DIR`; `checker.rs`'s
@@ -9168,7 +9168,7 @@ suite after such a change.
 
 What follows is the report as found.
 
-`crates/fixpt-fx26/tests/programs/made-code/allocated.fx` no longer
+`crates/fixpt-fx26/tests/programs/made-code-arm64/allocated.fx` no longer
 checks, so two tests fail on every run of the suite:
 `fixpt-fx26::checker::every_program_meant_to_run_checks` and
 `fixpt-cli::made_code::a_bloblet_made_by_the_routine` (whose `values`

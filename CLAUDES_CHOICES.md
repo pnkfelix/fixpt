@@ -867,7 +867,7 @@ off on x86_64 until step 2 re-ports it; the push is the user's).
      steps and native code does not (`deep.fx`, `deep-control.fx`,
      `quiet-boxes.fx`), as on arm64.
    - **`native-code?` and `seal-code` say no off arm64**: the code a
-     program makes is arm64's (`programs/made-code/`), and the convention
+     program makes is arm64's (`programs/made-code-arm64/`), and the convention
      `native-convention` declares is arm64's, so on x86_64 each program
      takes its fallback rather than run arm64 bytes. (No longer: "Code a
      program makes, on x86_64", 2026-10-18.)

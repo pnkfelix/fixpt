@@ -567,7 +567,7 @@ fn every_program_meant_to_run_checks() {
     // A program that declares the other machine's convention is refused
     // here, at its `define-convention`, as it is meant to be.
     let other = if cfg!(target_arch = "x86_64") { "(target arm64)" } else { "(target x86_64)" };
-    for sub in ["run", "bench", "bidirectional", "native", "groups", "made-code", "made-code-x86_64"] {
+    for sub in ["run", "bench", "bidirectional", "native", "groups", "made-code-arm64", "made-code-x86_64"] {
         let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
         names.sort();
         for path in names {

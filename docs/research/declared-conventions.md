@@ -211,7 +211,7 @@ that makes the code puts the ones it calls in the code bloblet's fields,
 which the code reads PC-relatively and calls as any procedure: native code
 directly, anything else by `foreign`. The program names them in FX-26, the
 checker types them, and the fields keep them alive: linking through the
-object, not a table. (2026-10-15; test `programs/made-code/linked.fx`.)
+object, not a table. (2026-10-15; test `programs/made-code-arm64/linked.fx`.)
 
 ### Data a generator reads
 
@@ -254,7 +254,7 @@ for a program that must hand the power on.
    tables, the lowering, the runtime and the evaluator written in FX-26;
    the bytecode VM calls a native closure as it calls a primitive, and
    the stencils' typed call checks for one, as the other arm64 machines'
-   do since `TODO.md` §93 (it crashed). Tests: `programs/made-code/
+   do since `TODO.md` §93 (it crashed). Tests: `programs/made-code-arm64/
    leaves.fx`, a leaf adding two fixnums and one returning its own field
    across collections, on all nine machines (`fixpt-cli/tests/
    made_code.rs`; the evaluator falls back); `fixpt-native/tests/
@@ -270,7 +270,7 @@ for a program that must hand the power on.
    refusal's (a clause not the implementation's, one it has not, one it
    has that the program left out, two of one role, an atom not a name nor
    an integer). Tests: `checker.rs`, `declared_conventions_alike`;
-   `programs/made-code/declared.fx` on all nine machines.
+   `programs/made-code-arm64/declared.fx` on all nine machines.
 5. *(Done 2026-10-14.)* Code that is not a leaf. Two routines for it, at
    state fields as `foreign` is, where fixpt's own code has inline
    sequences or bare call-outs: `poll` (`common_poll`: a stub's frame, the
@@ -281,7 +281,7 @@ for a program that must hand the power on.
    below 48 value slot `k` live, above it the frame's fields (link,
    return, map and the value slots), negative for all live. A program's
    code finds its own code bloblet in its closure (field 2), so it needs
-   no `adr`. Test: `programs/made-code/frames.fx`, 51 instructions (made by
+   no `adr`. Test: `programs/made-code-arm64/frames.fx`, 51 instructions (made by
    the encoder written in FX-26, `fx26:arm64.fx`): a frame of four value
    slots, a million pairs by `cons` across collections, `poll` on the
    loop's back edge, a call of the procedure it is given (native, or
@@ -293,7 +293,7 @@ for a program that must hand the power on.
    (`common_bloblet`, call-out 9, which may collect): a plain bloblet of
    the bytes in `x1` and the fields in `x2`, as `%make-bloblet-filled`
    makes it, zeroed, or the trap for sizes that refuses. Test:
-   `programs/made-code/allocated.fx`, made from a `convention`: two
+   `programs/made-code-arm64/allocated.fx`, made from a `convention`: two
    fields stored, each store marking its card, twenty thousand kept
    across collections, a size of -1 refused.
 6. *(Done 2026-10-15.)* Data a generator reads: the declaration as a
@@ -305,6 +305,6 @@ for a program that must hand the power on.
    kinds. Reading is total, then the value is printed back, and a
    declaration it does not print back to, clause for clause, is refused
    at the first that differs, so that nothing a `convention` cannot hold
-   is dropped unseen. Test: `programs/made-code/generated.fx`, step 5's
+   is dropped unseen. Test: `programs/made-code-arm64/generated.fx`, step 5's
    procedure made from a `convention` by the encoder written in FX-26,
    word for word the code `frames.fx` writes out, on all nine machines.

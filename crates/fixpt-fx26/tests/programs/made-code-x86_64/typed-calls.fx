@@ -2,7 +2,7 @@
 ;;; procedures, in tail position and not: on the arm64 cellular machines, a
 ;;; typed tail call of a native closure, which the Rust machine makes, then
 ;;; returns from the word; and register code's `invoke`, which calls it out
-;;; to the Rust machine. On x86_64: `made-code/typed-calls.fx` is this on
+;;; to the Rust machine. On x86_64: `made-code-arm64/typed-calls.fx` is this on
 ;;; arm64. Where this machine runs no native code, or runs another
 ;;; machine's, the answers it would give.
 

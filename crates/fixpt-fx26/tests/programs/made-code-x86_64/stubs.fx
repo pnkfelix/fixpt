@@ -4,7 +4,7 @@
 ;;; its code at its closure's field 2 plus the code distance: native code,
 ;;; or a stub that enters `foreign`. Given a primitive, a continuation, and
 ;;; a closure kept cellular. Where this machine runs no native code, the
-;;; answers it would give. `made-code/stubs.fx` is this on arm64.
+;;; answers it would give. `made-code-arm64/stubs.fx` is this on arm64.
 (define-convention x86_64-native
   (target x86_64)
   (registers

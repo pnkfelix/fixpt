@@ -6,7 +6,7 @@
 ;;; the x86_64 encoder written in FX-26 (`fx26:x86_64.fx`), each jump's
 ;;; displacement from where a first pass put the instructions. Then run as
 ;;; `frames.fx` runs it. Where this machine runs no native code, the answer
-;;; it would give. `made-code/generated.fx` is this on arm64.
+;;; it would give. `made-code-arm64/generated.fx` is this on arm64.
 (define-convention x86_64-native
   (target x86_64)
   (registers

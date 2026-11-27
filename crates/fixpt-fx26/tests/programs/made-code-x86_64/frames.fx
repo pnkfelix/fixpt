@@ -3,7 +3,7 @@
 ;;; its stack map, the stack's limit, pairs made by `cons` across
 ;;; collections, fuel and `poll`, and a call of a procedure it is given,
 ;;; native or not, to the convention it declares. Where this machine runs
-;;; no native code, the answer it would give. `made-code/frames.fx` is this
+;;; no native code, the answer it would give. `made-code-arm64/frames.fx` is this
 ;;; on arm64.
 (define-convention x86_64-native
   (target x86_64)

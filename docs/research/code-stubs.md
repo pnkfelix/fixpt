@@ -229,7 +229,7 @@ machine, and on two under time slices of 3 and a small nursery; on the
 bytecode VM, its primitive, and its continuation refused by `foreign`.
 `code_area.rs`: words below native code with their stub, freed when
 nothing refers to them; an image round trip of the code area. arm64's
-`made-code/stubs.fx` is written to the encoding but run only on arm64.
+`made-code-arm64/stubs.fx` is written to the encoding but run only on arm64.
 
 ### The open questions
 
