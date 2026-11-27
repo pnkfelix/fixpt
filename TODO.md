@@ -9140,3 +9140,80 @@ Then either keep phase 1's code from calling native code (as
 off within it), or let a native call nest (the machine's state saved and
 given back around the inner call, as `CALLED_OUT` does for call-outs). Test: the repro, staged and as a session
 step's macro, on every staging machine.
+
+## 313. ~~`made-code/allocated.fx` refused: `pack-code` reads `@heap`~~ (found 2026-11-26, failing on the arm64 Mac since 2026-10-29; done 2026-11-27)
+
+**Done: the program was wrong, not the checker.** `pack-code` makes its
+instructions by `append` of lists at `@heap`, and `append` reads them,
+`(maxeff (read r) (alloc r))`, so it reads `@heap`, which its result's type
+names. Until `61a2e792` (2026-10-29, "Masking keeps reads and writes on the
+result's regions", Heist's) masking dropped a read of a region only the
+result named, unsoundly; since, it keeps it, and the declared effect must
+say it. Found by bisecting `fixpt check` of the file between `0edd761c`
+(2026-10-15, which wrote it, checks) and `7385b073` (2026-11-01, refused).
+`pack-code` now declares `(read @heap)`, as its x86_64 twin had from the
+start (`made-code-x86_64/allocated.fx`, `makes`); no other arm64 program
+of `made-code/` is refused. Both tests pass.
+
+**Why it went unseen four weeks:** the two directories are twins, each
+run only on its own architecture (`made_code.rs`'s `DIR`; `checker.rs`'s
+`every_program_meant_to_run_checks` takes both, but a `define-convention`
+of the other architecture's `code` clause is refused there, so it is passed
+over), and `61a2e792`'s measurement (885 of 887 programs the same) was a
+machine's of the other architecture. Left: a change to what the checkers
+accept, measured on one architecture, can break the other's twin unseen.
+Checking a twin's types on either machine, all but its convention's
+`code` clause, would catch it; or the habit of running the arm64 Mac's
+suite after such a change.
+
+What follows is the report as found.
+
+`crates/fixpt-fx26/tests/programs/made-code/allocated.fx` no longer
+checks, so two tests fail on every run of the suite:
+`fixpt-fx26::checker::every_program_meant_to_run_checks` and
+`fixpt-cli::made_code::a_bloblet_made_by_the_routine` (whose `values`
+takes the program's last lines, so it compares the type lines printed
+before the refusal, `a64` and `role-reg`, with the values it wants,
+`"made 24 24"` and `1000000`). The refusal, at line 93:
+
+    `pack-code` is declared a (subr (maxeff (read @globals) (alloc @heap) spin)
+    (convention) (listof int @heap)): … and this is a (subr (maxeff (read @heap)
+    (read @globals) (alloc @heap) spin) …)
+      beyond what is expected, it has (read @heap)
+
+Both checkers alike. Found failing at `710e70dc` (2026-11-20) as at
+`ec31a434` (2026-11-26); the file was last changed on 2026-11-24
+(`e8613c90`, views, §310), so what it was refused for on 2026-11-20 is not
+known yet.
+
+**Where to start:** what in `pack-code`'s body reads `@heap`: a `car` of
+`(extract rg arguments)` (a list at `@heap`?), an `extract` of a product
+held at `@heap`, or a primitive whose effect changed. If the reading is
+real, its declared effect says it, `(read @heap)`, and so should
+`made-code-x86_64/allocated.fx`'s; if not, the change that made it so is
+the bug. Bisect from before 2026-11-20 (each step a release build of a
+worktree with its own `CARGO_TARGET_DIR`, about two minutes).
+
+## 314. The remembered set's bound: a minor collection scans past its budget, on every machine (found 2026-11-26, failing on the arm64 Mac since at least 2026-11-20)
+
+`fixpt-cli::remembered_set::on_*`, eleven tests, one a machine, fail: a
+minor collection of `programs/gc/cards.fx` (fresh lists stored into 1000
+old references, ten times, `FIXPT_NURSERY=4096`) scans far more dirty
+cards than §276's bound allows, 32 for that nursery and a slack of 2:
+78 on `fx-cells-rsinterp`, 110 on `fx-cells-rsinterp-nativecc`, the others
+alike. Found failing at `710e70dc` (2026-11-20) as at `ec31a434`
+(2026-11-26).
+
+Every machine alike points at what they share, not one machine's
+barrier: the collection no longer due once the budget is spent (the
+count of cards made dirty, `Heap`'s, not reaching the trigger, or reset),
+or cards marked that the budget does not count (the test counts what a
+collection scans of the barrier's mark, `; gc minor … the barrier's`,
+`FIXPT_GC_TRACE`). Check first whether it fails on the Linux x86_64
+machine too: if not, what differs (page or card size, the arm64 heap's
+layout).
+
+**Where to start:** `FIXPT_GC_TRACE=1 FIXPT_NURSERY=4096 fixpt --machine
+fx-cells-rsinterp eval crates/fixpt-cli/tests/programs/gc/cards.fx`, each
+minor collection's line: the dirty count at each, against when it was
+triggered. Then bisect from before 2026-11-20, as §313.
