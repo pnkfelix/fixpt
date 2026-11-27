@@ -134,6 +134,10 @@ impl fmt::Display for Sx {
             Sx::Bool(b) => f.write_str(if *b { "#t" } else { "#f" }),
             // `'x`, as the lowering wrote it.
             Sx::List(items) if items.len() == 2 && items[0] == Sx::sym("quote") => write!(f, "'{}", items[1]),
+            // `#Ltag"text"`, the tagged literal `(literal:tag #utf8"text")` reads from.
+            Sx::List(items) if let [Sx::Sym(h), Sx::Utf8(t)] = &items[..] && let Some(tag) = fixpt_read::literal_tag(h) => {
+                write!(f, "#L{tag}{}", Sx::Str(t.clone()))
+            }
             Sx::List(items) => {
                 f.write_str("(")?;
                 for (i, x) in items.iter().enumerate() {

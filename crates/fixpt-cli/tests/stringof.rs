@@ -149,6 +149,26 @@ fn byte_strings_on_every_machine() {
     }
 }
 
+/// Tagged literals, `#Ltag"text"`, each a use of `literal:tag`: a
+/// procedure's, a `let`'s, a macro's; quoted, written back as read.
+#[test]
+fn tagged_literals_on_every_machine() {
+    let want = [
+        "literal:twice",
+        "6",
+        "0",
+        "5",
+        "#Limg\"iVBORw0KGgo=\"",
+        "literal:img",
+        "#t",
+        "(a #L-A1\"y\" (literal:x \"plain\") (literal:x #utf8\"z\" 1))",
+    ];
+    let runs: Vec<_> = machines().into_iter().map(|m| (m, std::thread::spawn(move || values(m, "tagged-literals.fx")))).collect();
+    for (m, t) in runs {
+        assert_eq!(t.join().expect("ran"), want, "{m}");
+    }
+}
+
 /// A `utf8` read at an offset no character starts at, refused, on every
 /// machine as the primitive refuses it: the native code's fast paths
 /// (`TODO.md` §306) read a character of one byte in range, and leave the

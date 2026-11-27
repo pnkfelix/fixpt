@@ -375,8 +375,9 @@ fn every_directory_surveyed() {
 }
 
 /// The words not yet verified, each a rule the certificate does not yet
-/// carry what it needs for (`TODO.md` §117): none now.
-const KNOWN_GAPS: &[&str] = &[];
+/// carry what it needs for (`TODO.md` §117): a constant pair's type
+/// (`lit_type` gives none, so `(car '(a b))` is open, `TODO.md` §316).
+const KNOWN_GAPS: &[&str] = &["run/tagged-literals.fx `program`"];
 
 // Every word verified, a test for each shard of the programs
 // (`common::shard`), which nextest runs at once.

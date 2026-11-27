@@ -68,7 +68,7 @@
 (define show-syn (->* (syn) string)
   (lambda (s)
     (tagcase s
-      (lst (items d a b x) (if (null? items) "()" (string-append "(" (show-each items) ")")))
+      (lst (items d a b x) (show-list items))
       (dotted (items tail d a b x)
         (string-append "(" (show-each items) " . " (show-syn tail) ")"))
       (vec (items d a b x) (string-append "#(" (show-each items) ")"))
@@ -78,6 +78,41 @@
     (cond ((null? xs) "")
           ((null? (cdr xs)) (show-syn (car xs)))
           (else (string-append (show-syn (car xs)) " " (show-each (cdr xs)))))))
+;; A list of `items`, as `show-syn` writes one: a tagged literal's,
+;; `(literal:tag #utf8"text")`, as it reads, `#Ltag"text"`.
+(define show-list (->* (syns-a) string)
+  (lambda (items)
+    (let ((tagged (if (and (pair? items) (pair? (cdr items)) (null? (cdr (cdr items))))
+                      (show-tagged (car items) (car (cdr items)))
+                      "")))
+      (cond ((not (string=? tagged "")) tagged)
+            ((null? items) "()")
+            (else (string-append "(" (show-each items) ")"))))))
+;; `#Ltag"text"` if `h` is the name `literal:tag` and `t` a `utf8`; else "".
+(define show-tagged (->* (syn syn) string)
+  (lambda (h t)
+    (tagcase h
+      (atom (hd a b x)
+        (tagcase t
+          (atom (td c e y)
+            (if (symbol? hd) (if (utf8? td) (tagged-text (symbol->string hd) td) "") ""))
+          (else z "")))
+      (else z ""))))
+(define tagged-text (->* (string utf8) string)
+  (lambda (h u)
+    (let ((n (string-length h)))
+      (if (and (> n 8) (string=? (substring h 0 8) "literal:") (tag-chars? h 8))
+          (string-append "#L" (substring h 8 n) "\"" (utf8->string u) "\"")
+          ""))))
+;; Whether `s`'s characters from `i` are a tag's: ASCII letters, digits and
+;; `-` (the reader's `tag-chars?`).
+(define tag-chars? (->* (string int) bool)
+  (lambda (s i)
+    (or (= i (string-length s))
+        (let ((k (char->integer (string-ref s i))))
+          (and (or (and (>= k 48) (<= k 57)) (and (>= k 65) (<= k 90))
+                   (and (>= k 97) (<= k 122)) (= k 45))
+               (tag-chars? s (+ i 1)))))))
 ;; Bytevector `v`'s bytes up to `i`, space-separated, before `acc`.
 (define show-bytes (->* (bytevector int string) string)
   (lambda (v i acc)

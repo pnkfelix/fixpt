@@ -99,6 +99,16 @@ fn put_datum(out: &mut String, s: &Syntax, interner: &Interner, write: bool, map
             out.push_str("#:");
             put_symbol(out, interner.name(*sym))
         }
+        // `(literal:tag #utf8"text")`, written as the tagged literal it reads
+        // from, `#Ltag"text"`.
+        Datum::List { items, tail: None } if write && let [head, text] = &items[..]
+            && let (Datum::Symbol(h), Datum::Utf8(t)) = (&head.datum, &text.datum)
+            && let Some(tag) = literal_tag(interner.name(*h)) =>
+        {
+            out.push_str("#L");
+            out.push_str(tag);
+            put_string(out, t)
+        }
         Datum::List { items, tail } => {
             out.push('(');
             for (i, item) in items.iter().enumerate() {
@@ -191,6 +201,14 @@ fn put_char(out: &mut String, c: char) {
         }
         c => out.push(c),
     }
+}
+
+/// The tag of a tagged literal's name, `literal:tag` (`#Ltag"text"`, which
+/// reads as `(literal:tag #utf8"text")`): a tag is letters, digits and `-`,
+/// at least one. None if `name` is no such name.
+pub fn literal_tag(name: &str) -> Option<&str> {
+    let tag = name.strip_prefix("literal:")?;
+    (!tag.is_empty() && tag.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).then_some(tag)
 }
 
 fn put_string(out: &mut String, s: &str) {

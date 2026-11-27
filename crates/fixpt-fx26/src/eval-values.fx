@@ -457,6 +457,34 @@
       (o-key (k) "#<mark-key>")
       (o-host (h) "#<session>"))))
 
+;; `#Ltag"text"` if `p` is a tagged literal's list, `(literal:tag
+;; #utf8"text")`, as the machines write one; else "".
+(define show-tagged (->* ((pairof val val @v)) string)
+  (lambda (p)
+    (typecase (car p)
+      (symbol h
+        (typecase (cdr p)
+          (pair q (if (null? (cdr q))
+                      (typecase (car q) (utf8 u (tagged-text (symbol->string h) u)) (else ""))
+                      ""))
+          (else "")))
+      (else ""))))
+(define tagged-text (->* (string utf8) string)
+  (lambda (h u)
+    (let ((n (string-length h)))
+      (if (and (> n 8) (string=? (substring h 0 8) "literal:") (tag-chars? h 8))
+          (k-cat5 "#L" (substring h 8 n) "\"" (utf8->string u) "\"")
+          ""))))
+;; Whether `s`'s characters from `i` are a tag's: ASCII letters, digits and
+;; `-` (the reader's `tag-chars?`).
+(define tag-chars? (->* (string int) bool)
+  (lambda (s i)
+    (or (= i (string-length s))
+        (let ((k (char->integer (string-ref s i))))
+          (and (or (and (>= k 48) (<= k 57)) (and (>= k 65) (<= k 90))
+                   (and (>= k 97) (<= k 122)) (= k 45))
+               (tag-chars? s (+ i 1)))))))
+
 ;; A value as Scheme would write it. A list may be cyclic (built with
 ;; `set-cdr!`), so the walk has fuel: past it, `…`. The car of a pair gets
 ;; half what is left, so a cycle through cars and cdrs alike stays bounded.
@@ -475,7 +503,10 @@
         ;; As the machines write one (`TODO.md` §306).
         (utf8 u (k-cat3 "#utf8\"" (utf8->string u) "\""))
         (nil z "()")
-        (pair p (if (<= fuel 0) "…" (k-cat3 "(" (show-items p fuel) ")")))
+        (pair p (let ((t (show-tagged p)))
+                  (cond ((not (string=? t "")) t)
+                        ((<= fuel 0) "…")
+                        (else (k-cat3 "(" (show-items p fuel) ")")))))
         (procedure f "#<procedure>")
         (bloblet a (show-bloblet (+ 1 (array-length a)) 0))
         (f64 x (f64->string x))

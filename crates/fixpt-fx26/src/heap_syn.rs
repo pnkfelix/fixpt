@@ -1295,6 +1295,16 @@ impl Syn {
             }
         };
         let d = match self.view() {
+            // `(literal:tag #utf8"text")`, written as the tagged literal it
+            // reads from, `#Ltag"text"`, as the reader's writer does.
+            V::List { items, tail: None } if let [h, t] = items[..]
+                && let (V::Symbol(h), V::Utf8(t)) = (h.view(), t.view())
+                && let Some(tag) = fixpt_read::literal_tag(interner.name(h)) =>
+            {
+                out.push_str("#L");
+                out.push_str(tag);
+                return fixpt_read::write_atom(out, &Datum::Str(t), interner);
+            }
             V::List { items, tail } => {
                 out.push('(');
                 all(out, items);

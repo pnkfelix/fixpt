@@ -624,6 +624,15 @@
 (define unknown-hash (->* (cursor int string) void)
   (lambda (cur start what) (fail-at cur start (string-append "unknown `#` syntax: `#" what "`"))))
 (define bytes-message string "bytevector elements must be exact integers in 0..=255")
+(define tag-message string "a tagged literal's tag is letters, digits and `-`, at least one: `#")
+;; Whether `s`'s characters from `i` are a tag's: ASCII letters, digits and `-`.
+(define tag-chars? (->* (string int) bool)
+  (lambda (s i)
+    (or (= i (string-length s))
+        (let ((k (char->integer (string-ref s i))))
+          (and (or (and (>= k 48) (<= k 57)) (and (>= k 65) (<= k 90))
+                   (and (>= k 97) (<= k 122)) (= k 45))
+               (tag-chars? s (+ i 1)))))))
 
 ;; FX-26's `#%fx`, the module of the standard bindings, or `#%toplevel`,
 ;; the top level's, `cur` at the `%`; or `#%toplevel:n`, the top level's
@@ -767,6 +776,8 @@
               ((#\\) (read-char (advance cur) start))
               ((#\t #\f #\T #\F) (read-bool cur start))
               ((#\u #\U) (read-bytes start cur))
+              ((#\L #\l)
+               (if (fx26?) (read-tagged start cur) (unknown-hash cur start (char-string c))))
               ((#\b #\B #\o #\O #\d #\D #\x #\X #\e #\E #\i #\I) (read-atom-from cur start "#"))
               (else
                (cond ((and (char=? c #\%) (fx26?)) (read-fx-module cur start))
@@ -774,6 +785,29 @@
                      ((char-numeric? c)
                       (fail-at cur start "datum labels are not supported by the eager reader"))
                      (else (unknown-hash cur start (char-string c)))))))))))
+  ;; FX-26's `#Ltag"text"`, a tagged literal, `cur` at the `L`: read as
+  ;; `(literal:tag #utf8"text")`, a use of the name `literal:tag`, as the
+  ;; Rust reader's `read_tagged`.
+  (read-tagged (->* (int cursor) result)
+    (lambda (start cur)
+      (let* ((w (read-word cur)) (word (car w)) (cur (cdr w)) (n (string-length word)))
+        (cond ((not (and (> n 1) (tag-chars? word 1)))
+               (fail-at cur start (string-append tag-message word "`")))
+              ((not (char=? (cur-char cur) #\"))
+               (fail cur (string-append "expected `\"` after `#" word "`")))
+              (else
+               (let* ((at (cur-pos cur))
+                      (r (read-string (advance cur) at #f))
+                      (head (string->symbol (string-append "literal:" (substring word 1 n))))
+                      (text (tagcase (car r)
+                              (atom (d a b xpn)
+                                (if (string? d) (atom (string->utf8 d) a b 0) (car r)))
+                              (else x x))))
+                 (cons (lst (the syns (list (atom head start at 0) text))
+                            (datum-list2 head (syn->datum text))
+                            start
+                            (cur-pos (cdr r)) 0)
+                       (cdr r))))))))
   ;; `#u8(…)`, or FX-26's `#u`, `#utf8"…"` or `#u8"…"`: `cur` at the `u`.
   (read-bytes (->* (int cursor) result)
     (lambda (start cur)

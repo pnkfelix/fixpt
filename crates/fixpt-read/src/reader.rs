@@ -625,6 +625,7 @@ impl<'a, B: Build> Reader<'a, B> {
             '\\' => self.read_char(start),
             't' | 'f' | 'T' | 'F' => self.read_boolean(start),
             'u' | 'U' => self.read_u(start),
+            'L' | 'l' if self.profile.utf8_literals => self.read_tagged(start),
             'b' | 'B' | 'o' | 'O' | 'd' | 'D' | 'x' | 'X' | 'e' | 'E' | 'i' | 'I' => {
                 self.pos = start;
                 self.read_atom()
@@ -660,6 +661,28 @@ impl<'a, B: Build> Reader<'a, B> {
                 Err(ReadError::at(self.span_from(start), format!("unknown `#` syntax: `#{c}`")))
             }
         }
+    }
+
+    /// `#Ltag"text"`, a tagged literal (FX-26's profile, Heist's
+    /// `fixpt-tagged-literals.md`): read as `(literal:tag #utf8"text")`, a
+    /// use of the name `literal:tag`, as `'x` is of `quote`. Its tag is
+    /// letters, digits and `-`; its text a string's, escapes and all.
+    fn read_tagged(&mut self, start: usize) -> ReadResult<Out<B>> {
+        let word = self.take_while(|c, r| !r.is_delimiter(c));
+        let tag = &word[1..];
+        if tag.is_empty() || !tag.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            let message = format!("a tagged literal's tag is letters, digits and `-`, at least one: `#{word}`");
+            return Err(ReadError::at(self.span_from(start), message));
+        }
+        if self.peek() != Some('"') {
+            return Err(ReadError::at(self.here(), format!("expected `\"` after `#{word}`")));
+        }
+        let (head_span, text_start) = (self.span_from(start), self.pos);
+        let text = self.read_string_text(text_start)?;
+        let sym = self.interner.intern(&format!("literal:{tag}"));
+        let head = self.atom(head_span, Datum::Symbol(sym));
+        let text = self.atom(self.span_from(text_start), Datum::Utf8(text));
+        Ok(self.list(self.span_from(start), vec![head, text], None))
     }
 
     fn read_boolean(&mut self, start: usize) -> ReadResult<Out<B>> {

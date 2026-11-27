@@ -9232,3 +9232,34 @@ layout).
 fx-cells-rsinterp eval crates/fixpt-cli/tests/programs/gc/cards.fx`, each
 minor collection's line: the dirty count at each, against when it was
 triggered. Then bisect from before 2026-11-20, as §313.
+
+## 315. ~~Tagged literals, `#Ltag"text"`~~ (Heist's `fixpt-tagged-literals.md`, 2026-11-27; done the same day)
+
+**Done,** as the user decided it: `#Ltag"text"` reads as `(literal:tag
+#utf8"text")`, a use of the name `literal:tag`, so a tag means what that
+name is bound to: a macro's, run at expansion, a procedure's, where the
+literal is evaluated. FX-26's profile only. Both readers, every writer
+(the reader's, the runtime's, the Rust expander's `Syn::written`, the
+FX-26 lowering's `Sx`, `show-syn`, the FX-26 evaluator's `show-val`). `docs/fx26.md`, "Tagged literals".
+
+Left: a maker's refusal placed at an offset inside the text (now the
+whole literal); a pure procedure run at check time for a constant
+(partial evaluation, to be argued sound on its own); and the FX-26
+evaluator's `show-val` writes a string's, a `utf8`'s and so a tagged
+literal's text unescaped (`\n`, `\"` written raw), where every other
+machine escapes it (as before this).
+
+## 316. The cell verifier gives a constant pair no type (found 2026-11-27, by §315's test)
+
+`(car '(a b))` in a word is left open by the verifier, "pair-car of a
+value of no known type", on any quoted list, a tagged literal's or not:
+`lit_type` (`typed_cells.rs`) types a fixnum, a boolean, `()`, a char, a
+symbol and a closure made while compiling, and no pair. A quoted list
+bound to a global verifies (`(define d '(a b)) (car d)`, the global's
+type `datum`); one in the word, or a `let`'s, does not. No test program
+did this before §315's `run/tagged-literals.fx`, whose `program` word is
+`typed_cells.rs`'s one known gap for it.
+
+**To do, the user's to decide:** a constant pair's type `datum`, sound
+only if the constant is one: walked, every part a datum's (cycles
+bounded), else none, as now. Then drop the gap.

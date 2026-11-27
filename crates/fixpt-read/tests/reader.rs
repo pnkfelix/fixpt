@@ -591,6 +591,24 @@ fn fx26_reads_byte_text() {
     assert!(err(SyntaxProfile::SCHEME, "#u8\"a\"").contains("expected `(` after `#u8`"));
 }
 
+/// FX-26's tagged literals, `#Ltag"text"`: read as `(literal:tag
+/// #utf8"text")`, written back as read; a tag letters, digits and `-`.
+#[test]
+fn fx26_reads_tagged_literals() {
+    let text = r#"#Limg"a\"b\n" (#l-x1"" (literal:x "s"))"#;
+    let (forms, interner) = read(SyntaxProfile::FX26, text);
+    let Datum::List { items, tail: None } = &forms[0].datum else { panic!("{:?}", forms[0]) };
+    assert!(matches!(items[0].datum, Datum::Symbol(s) if interner.name(s) == "literal:img"));
+    assert_eq!(items[1].datum, Datum::Utf8("a\"b\n".into()));
+    assert_eq!((items[0].span.start, items[0].span.end, items[1].span.start), (0, 5, 5));
+    assert_eq!(show(SyntaxProfile::FX26, text), r#"#Limg"a\"b\n" (#L-x1"" (literal:x "s"))"#);
+    for bad in ["#L\"a\"", "#Lim_g\"a\"", "#L(a)"] {
+        assert!(err(SyntaxProfile::FX26, bad).contains("a tagged literal's tag is letters"), "{bad}");
+    }
+    assert!(err(SyntaxProfile::FX26, "#Limg \"a\"").contains("expected `\"` after `#Limg`"));
+    assert!(err(SyntaxProfile::SCHEME, "#Limg\"a\"").contains("unknown `#` syntax: `#L`"));
+}
+
 /// FX-26's qualified names (`#%toplevel:name`), the top level's `name`: one
 /// symbol of that spelling; a name neither empty, nor a number, nor written
 /// with `|` or `\`.

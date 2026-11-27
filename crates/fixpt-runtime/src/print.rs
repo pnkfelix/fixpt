@@ -144,6 +144,18 @@ fn put(
         });
         return;
     }
+    // `(literal:tag #utf8"text")`, written as the tagged literal it reads
+    // from, `#Ltag"text"`: its tail no label's, so nothing is lost.
+    if write && v.is_pair() && let (h, rest) = (heap.car(v), heap.cdr(v))
+        && heap.is_a(h, ObjType::Symbol) && rest.is_pair() && !labels.contains_key(&rest)
+        && heap.cdr(rest).is_null() && heap.is_utf8(heap.car(rest))
+        && let Some(tag) = fixpt_read::literal_tag(&heap.symbol_name(h))
+    {
+        out.push_str("#L");
+        out.push_str(tag);
+        put_string(out, &heap.utf8_string(heap.car(rest)));
+        return;
+    }
     if v.is_pair() {
         out.push('(');
         put(heap, heap.car(v), write, labels, out);
