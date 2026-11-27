@@ -711,7 +711,11 @@ pub fn card_mark(obj: Reg, disp: i32, st: Reg, cards_off: i32, t1: Reg, t2: Reg)
 /// allocation limit it gives written back. The generation table and the
 /// card table biased, at `[st + gens]` and `[st + cards]`. `t1` and `t2`
 /// scratch, neither `obj`, `v` nor `st`; `st` callee-saved. Every jump
-/// 32-bit (`x86-stored` makes the same bytes).
+/// 32-bit (`x86-stored` makes the same bytes). The `xmm` registers are not
+/// kept around the call: no compiler keeps a value in one across an
+/// operation (`direct/x64.rs`: raw `f64`s in `xmm0` and `xmm1` within one,
+/// "which nothing else keeps anything in"); one that did would have the
+/// barrier keep them too.
 pub fn stored(obj: Reg, disp: i32, v: Reg, st: Reg, offs: BarrierOffsets, t1: Reg, t2: Reg) -> Vec<u8> {
     assert!(![obj, v, st].contains(&t1) && ![obj, v, st].contains(&t2) && t1 != t2, "the barrier's scratch registers apart");
     let mut out: Vec<u8> = Vec::new();

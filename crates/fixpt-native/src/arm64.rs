@@ -377,7 +377,12 @@ pub const BARRIER_WORDS: usize = 52;
 /// is its address's `>> 30`, through the biased table at `[state, #gens]`;
 /// its card the address's `>> CARD_SHIFT`. `t1`, `t2` and `t3` are the
 /// caller's to lose, apart, none `v`, `state` or `x0`; `obj` may be one of
-/// them. The condition flags are lost.
+/// them. The condition flags are lost. The floating-point registers are
+/// not kept around the call (`barrier_store` may use any): no compiler
+/// keeps a value in one across an operation, raw `f64`s operated on in
+/// `d16` and `d17` from and into general registers within one (`direct.rs`;
+/// FX-26's `native-direct-arm64-raw.fx`, the same). A compiler that kept
+/// one there across a store would have the barrier keep them too.
 pub fn barrier(obj: Reg, off: i64, v: Reg, state: Reg, at: Barrier, t1: Reg, t2: Reg, t3: Reg) -> Vec<u32> {
     assert!(off.unsigned_abs() < 4096, "a field's offset in reach of one `add`");
     assert!([t1, t2, t3].iter().all(|t| ![v, state, 0].contains(t)) && t1 != t2 && t1 != t3 && t2 != t3, "the barrier's scratch registers apart");
