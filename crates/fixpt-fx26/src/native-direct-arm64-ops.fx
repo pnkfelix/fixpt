@@ -168,7 +168,7 @@
       (ada-e (arm-ldur d-x16 d-x9 (ado-fld d-global-writes)))
       (ada-e (arm-add-imm d-x16 d-x16 (ada-fixnum 1)))
       (ada-e (arm-stur d-x16 d-x9 (ado-fld d-global-writes)))
-      (ada-card-mark d-x9 (ado-fld 2) d-x16 d-x17))))
+      (ada-barrier d-x9 (ado-fld 2) d-result d-x16 d-x17 d-x13))))
 
 ;; `RESULT` := a field `off` from `from`: past `ldur`'s reach through its
 ;; address in X16, by one `sub`, or past its reach by the offset.
@@ -200,12 +200,12 @@
           (begin (ada-imm d-x16 off)
                  (ada-e (arm-add d-x16 d-result d-x16))
                  (ada-e (arm-stur v d-x16 0))
-                 (ada-card-mark d-x16 0 d-x16 d-x17))
+                 (ada-barrier d-x16 0 v d-x16 d-x17 d-x13))
           (begin
             (if (< off -256)
                 (begin (ada-e (arm-sub-imm d-x16 d-result (- 0 off))) (ada-e (arm-stur v d-x16 0)))
                 (ada-e (arm-stur v d-result off)))
-            (ada-card-mark d-result off d-x16 d-x17))))))
+            (ada-barrier d-result off v d-x16 d-x17 d-x13))))))
 
 ;;; ------------------------------------------------------------ what registers hold
 

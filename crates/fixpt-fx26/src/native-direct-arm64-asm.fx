@@ -448,6 +448,12 @@
 ;; `t1` and `t2`.
 (define ada-card-mark (subr da-assembles (int int int int) unit)
   (lambda (obj off t1 t2) (ada-es (arm-card-mark obj off d-st d-st-cards t1 t2))))
+;; The write barrier after `v` is stored at `[obj, #off]` (`arm64::barrier`,
+;; `TODO.md` §276); `t1`, `t2`, `t3` lost.
+(define ada-barrier (subr da-assembles (int int int int int int) unit)
+  (lambda (obj off v t1 t2 t3)
+    (ada-es (arm-barrier obj off v d-st d-st-gens d-st-cards d-st-barrier d-st-barrier-heap
+                         d-st-alloc-limit t1 t2 t3))))
 
 ;; Where field `k` of a bloblet is from its reference (`field_off`).
 (define ada-field-off (subr pure (int) int) (lambda (k) (- 0 (+ 4 (* 8 k)))))

@@ -99,6 +99,18 @@ fn off(f: usize) -> u32 {
     f as u32
 }
 
+/// Where the write barrier finds its state's fields (`arm64::barrier`;
+/// `TODO.md` §276).
+pub(crate) fn barrier_at() -> Barrier {
+    Barrier {
+        gens: off(offset_of!(State, gens)),
+        cards: off(offset_of!(State, cards)),
+        call: off(offset_of!(State, barrier)),
+        heap: off(offset_of!(State, barrier_heap)),
+        limit: off(offset_of!(State, alloc_limit)),
+    }
+}
+
 /// Field `k` of the bloblet whose `suffix + 4` is in a register, as an
 /// offset from that register.
 fn field_off(k: usize) -> i64 {
@@ -955,7 +967,7 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
                 a.e(ldur(X16, X11, field_off(fixpt_heap::layout::cellular::GLOBAL_WRITES)));
                 a.e(add_imm(X16, X16, Value::fixnum(1).raw() as u32));
                 a.e(stur(X16, X11, field_off(fixpt_heap::layout::cellular::GLOBAL_WRITES)));
-                a.es(&card_mark(X11, field_off(2), ST, off(offset_of!(State, cards)), X13, X16));
+                a.es(&barrier(X11, field_off(2), X15, ST, barrier_at(), X13, X16, 17));
             }
             a.cont();
         }

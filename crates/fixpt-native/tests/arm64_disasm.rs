@@ -26,6 +26,8 @@ fn every_encoder_reads_back() {
         (sub_imm(20, 11, 20), "sub x20, x11, #20"),
         (add(11, 19, 9), "add x11, x19, x9"),
         (add_lsl(1, 2, 3, 3), "add x1, x2, x3, lsl #3"),
+        (add_lsr(16, 16, 13, 30), "add x16, x16, x13, lsr #30"),
+        (ldrb(16, 16), "ldrb w16, [x16, #0]"),
         (sub(13, 13, 20), "sub x13, x13, x20"),
         (adds(0, 1, 2), "adds x0, x1, x2"),
         (subs(0, 1, 2), "subs x0, x1, x2"),

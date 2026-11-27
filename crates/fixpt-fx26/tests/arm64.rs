@@ -146,6 +146,23 @@ fn every_instruction_as_the_rust_encoder_makes_it() {
         sc.view(|v| v.get(r).fixnum())
     });
     assert_eq!(ret, Some(a::ret() as i64));
+    // The write barrier (`TODO.md` §276): the object in a scratch register
+    // or not, the value `x0` or another, offsets either side.
+    let at = a::Barrier { gens: 656, cards: 304, call: 664, heap: 672, limit: 168 };
+    for (obj, off, v, t) in [(11u32, -20i64, 15u32, [13u32, 16, 17]), (16, 0, 3, [16, 13, 17]), (0, -12, 2, [16, 17, 13]), (9, 4092, 0, [16, 17, 13])] {
+        let want: Vec<i64> = a::barrier(obj, off, v, 24, at, t[0], t[1], t[2]).into_iter().map(|w| w as i64).collect();
+        let got: Vec<i64> = s.scope(|sc| {
+            let args: Vec<_> = [obj as i64, off, v as i64, 24, at.gens as i64, at.cards as i64, at.call as i64, at.heap as i64, at.limit as i64, t[0] as i64, t[1] as i64, t[2] as i64]
+                .iter()
+                .map(|x| sc.make(|_| Value::fixnum(*x)))
+                .collect();
+            let r = sc.call_global("fx:arm-barrier", &args).expect("runs");
+            sc.view(|w| w.get(r).list().expect("a list").iter().map(|x| x.fixnum().expect("an int")).collect())
+        });
+        if got != want {
+            wrong.push(format!("arm-barrier {obj} {off} {v}: FX-26 {got:x?}, Rust {want:x?}"));
+        }
+    }
     let nop = s.scope(|sc| {
         let r = sc.global(&"fx:arm-nop").expect("bound");
         sc.view(|v| v.get(r).fixnum())

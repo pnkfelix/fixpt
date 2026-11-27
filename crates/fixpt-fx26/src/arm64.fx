@@ -137,8 +137,9 @@
   (lambda (op d n s) (arm-check (arm-in? s 0 64) (arm-n-t op (arm-f s 16) n d))))
 (define arm-asr-imm arm-op3 (lambda (d n s) (arm-shift-imm #x9340FC00 d n s)))
 (define arm-lsr-imm arm-op3 (lambda (d n s) (arm-shift-imm #xD340FC00 d n s)))
-;; `strb wt, [xn]`.
+;; `strb wt, [xn]`; `ldrb wt, [xn]`.
 (define arm-strb arm-op2 (lambda (t n) (arm-sum3 #x39000000 (arm-reg-at n 5) (arm-reg t))))
+(define arm-ldrb arm-op2 (lambda (t n) (arm-sum3 #x39400000 (arm-reg-at n 5) (arm-reg t))))
 (define arm-csel arm-op4
   (lambda (d n m c) (arm-n-t #x9A800000 (arm-sum (arm-reg-at m 16) (arm-f c 12)) n d)))
 
@@ -204,6 +205,10 @@
 (define arm-add-lsl arm-op4
   (lambda (d n m s)
     (arm-check (arm-in? s 0 64) (arm-n-t #x8B000000 (arm-sum (arm-reg-at m 16) (arm-f s 10)) n d))))
+;; `add xd, xn, xm, lsr #s`.
+(define arm-add-lsr arm-op4
+  (lambda (d n m s)
+    (arm-check (arm-in? s 0 64) (arm-n-t #x8B400000 (arm-sum (arm-reg-at m 16) (arm-f s 10)) n d))))
 ;; `cmp sp, xm`.
 (define arm-cmp-sp (->* (int) int) (lambda (m) (arm-sum #xEB2063FF (arm-reg-at m 16))))
 (define arm-eor arm-op3 (lambda (d n m) (arm-reg3 #xCA000000 d n m)))
@@ -249,6 +254,50 @@
                 (cons (arm-ldr t2 state cards)
                       (cons (arm-add t2 t2 t1)
                             (cons (arm-movz t1 1 0) (cons (arm-strb t1 t2) nil))))))))
+
+;; The write barrier after `v` is stored at `obj + off` (`arm64::barrier`,
+;; `TODO.md` §276), word for word: the place young, nothing; `v` no
+;; reference, or no younger than the place, nothing; `v` young onto a dirty
+;; card, nothing; else the heap's store, `call` with the heap at `heap`,
+;; `x0`-`x17` and the link kept, the allocation limit it gives at `limit`.
+;; `gens`, `cards`, `call`, `heap` and `limit` are offsets from `st`; `t1`,
+;; `t2`, `t3` lost, none `v`, `st` or `x0`. Its jumps' offsets are fixed:
+;; 52 words, the value's generation at 14, the heap's at 25.
+(define arm-barrier
+  (subr (maxeff (alloc @k) (read @k) (read @globals) spin)
+        (int int int int int int int int int int int int) arm-code)
+  (lambda (obj off v st gens cards call heap limit t1 t2 t3)
+    (let ((gen-of (lambda ((d int) (of int))
+                    (arm-k (list (arm-ldr d st gens) (arm-add-lsr d d of 30) (arm-ldrb d d)
+                                 (arm-ubfx d d 0 7)))))
+          ;; `x0`-`x17` and the link, in pairs, `xzr` the link's.
+          (regs (the (listof int acyclic) (list 0 2 4 6 8 10 12 14 16 30))))
+      (append
+        (arm-k (list (if (< off 0) (arm-sub-imm t1 obj (- 0 off)) (arm-add-imm t1 obj off))))
+        (gen-of t2 t1)
+        (arm-k (list (arm-cbz t2 47) (arm-ubfx t3 v 0 3)
+                     (arm-cmp-imm t3 1) (arm-b-cond 0 6) (arm-cmp-imm t3 4) (arm-b-cond 0 4)
+                     (arm-cmp-imm t3 2) (arm-b-cond 1 40) (arm-b 12)))
+        (gen-of t3 v)
+        (arm-k (list (arm-cmp t2 t3) (arm-b-cond 9 33) (arm-cbnz t3 5)
+                     (arm-ldr t3 st cards) (arm-add-lsr t3 t3 t1 9) (arm-ldrb t3 t3)
+                     (arm-cbnz t3 28)))
+        (arm-k (arm-pairs regs #t))
+        (arm-k (list (arm-mov 0 v) (arm-mov 1 t1) (arm-mov 2 0) (arm-ldr 0 st heap)
+                     (arm-ldr 16 st call) (arm-blr 16) (arm-str 0 st limit)))
+        (arm-k (reverse (arm-pairs regs #f)))))))
+;; Each register `r` of `rs` and the next, `xzr` after the link: pushed,
+;; `stp r, r+1, [sp, #-16]!`, or popped, `ldp r, r+1, [sp], #16`.
+(define arm-pairs (->* ((listof int acyclic) bool) (listof int acyclic))
+  (lambda (rs push)
+    (if (null? rs)
+        nil
+        (let* ((r (car rs)) (r2 (if (= r 30) 31 (+ r 1))))
+          (cons (if push (arm-stp-pre r r2 31 -16) (arm-ldp-post r r2 31 16))
+                (arm-pairs (cdr rs) push))))))
+;; A list of words in `@k`, the caller's region.
+(define arm-k (->* ((listof int acyclic)) arm-code)
+  (lambda (ws) (if (null? ws) nil (cons (car ws) (arm-k (cdr ws))))))
 
 ;; Floating point: `d` registers numbered as `x` ones, each a double.
 (define arm-fmov-to-d arm-op2 (lambda (d n) (arm-n-t #x9E670000 0 n d)))

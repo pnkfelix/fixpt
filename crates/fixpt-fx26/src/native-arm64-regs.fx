@@ -551,7 +551,7 @@
                  (n-e (arm-stur a-result n-x11 (n-field-off 2)))
                  ;; One more write, for the guards (`global-guard`).
                  (n-bump-writes)
-                 (n-card-mark n-x11 (n-field-off 2))))))
+                 (n-barrier n-x11 (n-field-off 2) a-result n-x13 n-x16 17)))))
         ((= op rop-reg) (n-e (arm-mov a-result (ar-reg (ar-k rw i 0)))))
         ((= op rop-setreg) (n-e (arm-mov (ar-reg (ar-k rw i 0)) a-result)))
         ((= op rop-movereg) (n-e (arm-mov (ar-reg (ar-k rw i 1)) (ar-reg (ar-k rw i 0)))))
@@ -590,11 +590,11 @@
            (begin
              (n-e (arm-mov n-x11 a-result))
              (if (>= off -256)
-                 (begin (n-e (arm-stur v n-x11 off)) (n-card-mark n-x11 off))
+                 (begin (n-e (arm-stur v n-x11 off)) (n-barrier n-x11 off v n-x13 n-x16 17))
                  (begin
                    (ar-sub-const n-x16 n-x11 (- 0 off))
                    (n-e (arm-str v n-x16 0))
-                   (n-card-mark n-x16 0))))))
+                   (n-barrier n-x16 0 v n-x16 n-x13 17))))))
         ((or (= op rop-prim) (= op rop-lambda) (= op rop-cellular)) (ar-callouts rw i op next))
         ((or (= op rop-invoke) (= op rop-tailinvoke)) (ar-invoke rw i op next))
         ;; A call of the procedure itself: a `bl` to this word's own entry.

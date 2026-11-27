@@ -622,7 +622,7 @@
          (n-cbnz n-x13 slow)
          (n-e (arm-sub n-x11 1 2))
          (n-e (arm-stur 3 n-x11 -4))
-         (n-card-mark n-x11 -4)
+         (n-barrier n-x11 -4 3 n-x13 n-x16 17)
          (n-value a-result a-unspecified)))
       ((string=? what "whitespace")
        (begin

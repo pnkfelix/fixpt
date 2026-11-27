@@ -43,6 +43,9 @@
             (val arm-ubfx arm-op4)
             (val arm-asr-imm arm-op3)
             (val arm-lsr-imm arm-op3)
+            (val arm-barrier
+                 (subr (maxeff (alloc @k) (read @k) (read @globals) spin)
+                       (int int int int int int int int int int int int) arm-code))
             (val arm-strb arm-op2)
             (val arm-csel arm-op4)
             (val arm-movz arm-op3)
@@ -166,4 +169,7 @@
             (val arm-fmov-from-s arm-op2)
             (val arm-card-mark
                  (subr (maxeff (alloc @k) (read @globals) spin) (int int int int int int)
-                       arm-code))))
+                       arm-code))
+            (val arm-barrier
+                 (subr (maxeff (alloc @k) (read @k) (read @globals) spin)
+                       (int int int int int int int int int int int int) arm-code))))

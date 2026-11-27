@@ -737,7 +737,7 @@
       (ada-bc ada-c-ne slow)
       (ada-e (arm-sub d-x11 1 2))
       (ada-e (arm-stur 3 d-x11 -4))
-      (ada-card-mark d-x11 -4 d-x13 d-x16)
+      (ada-barrier d-x11 -4 3 d-x13 d-x16 d-x17)
       (ada-imm d-result d-unspecified)
       (ada-b done))))
 

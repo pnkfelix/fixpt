@@ -707,7 +707,7 @@ impl Asm {
                 self.cbnz(X13, slow);
                 self.e(sub(X11, 1, 2));
                 self.e(stur(3, X11, -4));
-                self.es(&card_mark(X11, -4, ST, off(offset_of!(State, cards)), X13, X16));
+                self.es(&barrier(X11, -4, 3, ST, super::barrier_at(), X13, X16, 17));
                 self.value(RESULT, Value::UNSPECIFIED);
             }
             // `char-whitespace?` of an ASCII character: tab to carriage
@@ -1164,7 +1164,7 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                     a.e(ldur(X16, X11, field_off(GLOBAL_WRITES)));
                     a.e(add_imm(X16, X16, Value::fixnum(1).raw() as u32));
                     a.e(stur(X16, X11, field_off(GLOBAL_WRITES)));
-                    a.es(&card_mark(X11, field_off(2), ST, off(offset_of!(State, cards)), X13, X16));
+                    a.es(&barrier(X11, field_off(2), RESULT, ST, super::barrier_at(), X13, X16, 17));
                 }
             }
             "reg" => a.e(mov(RESULT, reg(k(o(0))))),
@@ -1323,11 +1323,11 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                 let off = field_off(k(o(0)));
                 if off >= -256 {
                     a.e(stur(reg(k(o(1))), X11, off));
-                    a.es(&card_mark(X11, off, ST, super::off(offset_of!(State, cards)), X13, X16));
+                    a.es(&barrier(X11, off, reg(k(o(1))), ST, super::barrier_at(), X13, X16, 17));
                 } else {
                     a.sub_const(X16, X11, -off as u64);
                     a.e(str(reg(k(o(1))), X16, 0));
-                    a.es(&card_mark(X16, 0, ST, super::off(offset_of!(State, cards)), X13, X16));
+                    a.es(&barrier(X16, 0, reg(k(o(1))), ST, super::barrier_at(), X16, X13, 17));
                 }
             }
             "prim" | "lambda" | "cellular" => {

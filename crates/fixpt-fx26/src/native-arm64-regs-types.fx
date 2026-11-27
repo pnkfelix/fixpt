@@ -51,6 +51,7 @@
             (val n-reset (subr (maxeff ar-assembles spin) () unit))
             (val n-field-off (subr pure (int) int))
             (val n-card-mark (subr (maxeff ar-assembles spin) (int int) unit))
+            (val n-barrier (subr (maxeff ar-assembles spin) (int int int int int int) unit))
             (val n-bump-writes (subr (maxeff ar-assembles spin) () unit))
             (val n-enter-cur (subr (maxeff ar-assembles spin) (int) unit))
             (val n-fp-encode (subr (maxeff ar-assembles spin) (int) unit))

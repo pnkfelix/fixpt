@@ -339,6 +339,83 @@ pub fn card_mark(obj: Reg, off: i64, state: Reg, cards: u32, t1: Reg, t2: Reg) -
         strb(t1, t2),
     ]
 }
+/// `ldrb wt, [xn]`.
+pub fn ldrb(t: Reg, n: Reg) -> u32 {
+    0x3940_0000 | r(n) << 5 | r(t)
+}
+/// `add xd, xn, xm, lsr #s`.
+pub fn add_lsr(d: Reg, n: Reg, m: Reg, s: u32) -> u32 {
+    assert!(s < 64);
+    0x8B40_0000 | r(m) << 16 | s << 10 | r(n) << 5 | r(d)
+}
+
+/// Where the write barrier finds what it reads of its machine's state,
+/// each a byte offset from the state's register (`TODO.md` §276): the
+/// generation table and the card table, biased; the heap's store,
+/// `barrier_store`, and the heap it is given; the allocation limit.
+#[derive(Clone, Copy, Debug)]
+pub struct Barrier {
+    pub gens: u32,
+    pub cards: u32,
+    pub call: u32,
+    pub heap: u32,
+    pub limit: u32,
+}
+
+/// How many words [`barrier`] is: its jumps' offsets are fixed by it, so
+/// that `arm-barrier` writes them as numbers.
+pub const BARRIER_WORDS: usize = 52;
+
+/// The write barrier after `v` is stored at `[obj, #off]` (`TODO.md`
+/// §276), as `x86_64::stored`'s test, `Heap::barrier_needs_heap`'s: the
+/// place young, nothing; `v` no reference, or no younger than the place,
+/// nothing; `v` young and the place's card dirty already, nothing; else
+/// the heap stores it again, marking and counting as `Heap::set_slot` does
+/// (`barrier_store`, `Heap::store_at_address`), every register `x0`–`x17`
+/// and the link kept around the call, the allocation limit it gives written
+/// back (0 when the remembered set's budget is spent). A place's generation
+/// is its address's `>> 30`, through the biased table at `[state, #gens]`;
+/// its card the address's `>> CARD_SHIFT`. `t1`, `t2` and `t3` are the
+/// caller's to lose, apart, none `v`, `state` or `x0`; `obj` may be one of
+/// them. The condition flags are lost.
+pub fn barrier(obj: Reg, off: i64, v: Reg, state: Reg, at: Barrier, t1: Reg, t2: Reg, t3: Reg) -> Vec<u32> {
+    assert!(off.unsigned_abs() < 4096, "a field's offset in reach of one `add`");
+    assert!([t1, t2, t3].iter().all(|t| ![v, state, 0].contains(t)) && t1 != t2 && t1 != t3 && t2 != t3, "the barrier's scratch registers apart");
+    let gen_of = |d: Reg, of: Reg| [ldr(d, state, at.gens), add_lsr(d, d, of, 30), ldrb(d, d), ubfx(d, d, 0, 7)];
+    let (vgen, slow, done) = (14i64, 25i64, BARRIER_WORDS as i64);
+    let mut out = vec![if off < 0 { sub_imm(t1, obj, off.unsigned_abs() as u32) } else { add_imm(t1, obj, off as u32) }];
+    // The place's generation: young, nothing to do.
+    out.extend(gen_of(t2, t1));
+    out.push(cbz(t2, done - 5));
+    // The value's tag: a pair or a bloblet, its address its generation's;
+    // a suffix ref, its owner's, which the heap finds; else no reference.
+    out.push(ubfx(t3, v, 0, 3));
+    out.push(cmp_imm(t3, fixpt_heap::value::TAG_PAIR as u32));
+    out.push(b_cond(Cond::Eq, vgen - 8));
+    out.push(cmp_imm(t3, fixpt_heap::value::TAG_BLOBLET as u32));
+    out.push(b_cond(Cond::Eq, vgen - 10));
+    out.push(cmp_imm(t3, fixpt_heap::value::TAG_SUFFIX_REF as u32));
+    out.push(b_cond(Cond::Ne, done - 12));
+    out.push(b(slow - 13));
+    // No younger than the place: nothing. Not young: the heap's.
+    out.extend(gen_of(t3, v));
+    out.push(cmp(t2, t3));
+    out.push(b_cond(Cond::Ls, done - 19));
+    out.push(cbnz(t3, slow - 20));
+    // Young: the place's card dirty already, nothing more.
+    out.extend([ldr(t3, state, at.cards), add_lsr(t3, t3, t1, CARD_SHIFT), ldrb(t3, t3)]);
+    out.push(cbnz(t3, done - 24));
+    // The heap's: `x0`–`x17` and the link kept, in pairs, so that the stack
+    // stays aligned; `v` and the place given through `x0`, kept already.
+    assert_eq!(out.len() as i64, slow);
+    const PAIRS: [(Reg, Reg); 10] = [(0, 1), (2, 3), (4, 5), (6, 7), (8, 9), (10, 11), (12, 13), (14, 15), (16, 17), (30, 31)];
+    out.extend(PAIRS.iter().map(|&(a, c)| stp_pre(a, c, SP, -16)));
+    out.extend([mov(0, v), mov(1, t1), mov(2, 0), ldr(0, state, at.heap), ldr(16, state, at.call), blr(16), str(0, state, at.limit)]);
+    out.extend(PAIRS.iter().rev().map(|&(a, c)| ldp_post(a, c, SP, 16)));
+    assert_eq!(out.len(), BARRIER_WORDS);
+    out
+}
+
 /// Load any 64-bit constant: `movz` then as many `movk`s as needed.
 pub fn mov_imm64(d: Reg, v: u64) -> Vec<u32> {
     let mut out = vec![movz(d, (v & 0xffff) as u32, 0)];

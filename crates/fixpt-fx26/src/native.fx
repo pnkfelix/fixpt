@@ -217,6 +217,14 @@
       (n-e (arm-add n-x16 n-x16 n-x13))
       (n-e (arm-movz n-x13 1 0))
       (n-e (arm-strb n-x13 n-x16)))))
+;; The write barrier after `v` is stored at `[obj, #off]`, as the Rust
+;; machine's `barrier` makes it (`TODO.md` §276): the heap told only of a
+;; young value stored into an older place onto a clean card, or of one it
+;; must find the generation of; `t1`, `t2`, `t3` lost.
+(define n-barrier (->* (int int int int int int) unit)
+  (lambda (obj off v t1 t2 t3)
+    (n-es (arm-barrier obj off v n-st n-st-gens n-st-cards n-st-barrier n-st-barrier-heap
+                       n-st-alloc-limit t1 t2 t3))))
 ;; One more write of the global cell in x11, for the guards
 ;; (`global-guard`): its count of writes, a fixnum, one more; `x16` lost.
 (define n-bump-writes (->* () unit)
@@ -722,7 +730,7 @@
                (n-e (arm-ldr-post n-x15 n-dsp 8))
                (n-e (arm-stur n-x15 n-x11 (n-field-off 2)))
                (n-bump-writes)
-               (n-card-mark n-x11 (n-field-off 2))))
+               (n-barrier n-x11 (n-field-off 2) n-x15 n-x13 n-x16 17)))
          (n-cont-code)))
       ((or (= n routine-call) (= n routine-tailcall) (= n routine-tcall) (= n routine-ttailcall))
        (n-call n))

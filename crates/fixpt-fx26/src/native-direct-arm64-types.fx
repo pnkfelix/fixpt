@@ -84,6 +84,7 @@
             (val ada-pure-call (subr da-assembles (int da-bytes int) unit))
             (val ada-check-fixnum (subr da-assembles (int int) unit))
             (val ada-card-mark (subr da-assembles (int int int int) unit))
+            (val ada-barrier (subr da-assembles (int int int int int int) unit))
             (val ada-field-off (subr pure (int) int))
             (val ada-header (subr pure (int int int) int))
             (val ada-trailer (subr pure (int) int))

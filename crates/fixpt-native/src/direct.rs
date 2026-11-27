@@ -973,6 +973,18 @@ fn st_off(f: usize) -> u32 {
     f as u32
 }
 
+/// Where the write barrier finds the state's fields (`arm64::barrier`;
+/// `TODO.md` §276).
+fn barrier_at() -> Barrier {
+    Barrier {
+        gens: st_off(offset_of!(DState, gens)),
+        cards: st_off(offset_of!(DState, cards)),
+        call: st_off(offset_of!(DState, barrier)),
+        heap: st_off(offset_of!(DState, barrier_heap)),
+        limit: st_off(offset_of!(DState, alloc_limit)),
+    }
+}
+
 /// The native stack is the heap's (`Heap::native_stack`), at the nursery's
 /// top; a run's stack cache is part of it, with room below its limit for
 /// the frame that finds it has passed it.
@@ -2640,7 +2652,7 @@ impl Compiling<'_> {
                     a.e(ldur(X16, X9, field_off(GLOBAL_WRITES)));
                     a.e(add_imm(X16, X16, Value::fixnum(1).raw() as u32));
                     a.e(stur(X16, X9, field_off(GLOBAL_WRITES)));
-                    a.es(&card_mark(X9, field_off(2), ST, st_off(offset_of!(DState, cards)), X16, X17));
+                    a.es(&barrier(X9, field_off(2), RESULT, ST, barrier_at(), X16, X17, X13));
                 }
                 "lexical" => {
                     let from = match clo_slot.filter(|_| framed[i]) {
@@ -2930,12 +2942,11 @@ impl Compiling<'_> {
                 }
                 "setfield" => {
                     let off = field_off(k(o(0)));
-                    let cards = st_off(offset_of!(DState, cards));
                     if off < -4095 {
                         a.es(&mov_imm64(X16, off as u64));
                         a.e(add(X16, RESULT, X16));
                         a.e(stur(reg(o(1)), X16, 0));
-                        a.es(&card_mark(X16, 0, ST, cards, X16, X17));
+                        a.es(&barrier(X16, 0, reg(o(1)), ST, barrier_at(), X16, X17, X13));
                     } else {
                         if off < -256 {
                             a.e(sub_imm(X16, RESULT, off.unsigned_abs() as u32));
@@ -2943,7 +2954,7 @@ impl Compiling<'_> {
                         } else {
                             a.e(stur(reg(o(1)), RESULT, off));
                         }
-                        a.es(&card_mark(RESULT, off, ST, cards, X16, X17));
+                        a.es(&barrier(RESULT, off, reg(o(1)), ST, barrier_at(), X16, X17, X13));
                     }
                 }
                 // Control, on the native stack (`docs/research/
@@ -3695,7 +3706,7 @@ impl Compiling<'_> {
                         a.to(slow, Fix::If(Cond::Ne));
                         a.e(sub(X11, 1, 2));
                         a.e(stur(3, X11, -4));
-                        a.es(&card_mark(X11, -4, ST, st_off(offset_of!(DState, cards)), X13, X16));
+                        a.es(&barrier(X11, -4, 3, ST, barrier_at(), X13, X16, X17));
                         a.es(&mov_imm64(RESULT, Value::UNSPECIFIED.raw()));
                         a.to(done, Fix::B);
                     }

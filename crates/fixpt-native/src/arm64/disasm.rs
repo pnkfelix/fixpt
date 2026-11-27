@@ -15,8 +15,10 @@ pub fn disassemble(w: u32, at: i64) -> String {
     let shift = (w >> 10) & 63;
     let (x, sp) = (xr, spr);
     let is = |mask: u32, val: u32| w & mask == val;
+    // A shifted register's shift, by its type (bits 23–22).
+    let kind = ["lsl", "lsr", "asr", "ror"][((w >> 22) & 3) as usize];
     let three = |op: &str| {
-        if shift == 0 { format!("{op} {}, {}, {}", x(d), x(n), x(m)) } else { format!("{op} {}, {}, {}, lsl #{shift}", x(d), x(n), x(m)) }
+        if shift == 0 && kind == "lsl" { format!("{op} {}, {}, {}", x(d), x(n), x(m)) } else { format!("{op} {}, {}, {}, {kind} #{shift}", x(d), x(n), x(m)) }
     };
     match () {
         _ if w == 0xD503_201F => "nop".into(),
@@ -35,6 +37,7 @@ pub fn disassemble(w: u32, at: i64) -> String {
         _ if is(0xFFC0_0000, 0xF940_0000) => format!("ldr {}, [{}, #{}]", x(d), sp(n), imm12 * 8),
         _ if is(0xFFC0_0000, 0xF900_0000) => format!("str {}, [{}, #{}]", x(d), sp(n), imm12 * 8),
         _ if is(0xFFC0_0000, 0x3900_0000) => format!("strb w{d}, [{}, #{imm12}]", sp(n)),
+        _ if is(0xFFC0_0000, 0x3940_0000) => format!("ldrb w{d}, [{}, #{imm12}]", sp(n)),
         _ if is(0xFF00_0000, 0x5800_0000) => format!("ldr {}, {}", x(d), target(at, imm19)),
         _ if is(0xFFE0_FC00, 0xF860_6800) => format!("ldr {}, [{}, {}]", x(d), sp(n), x(m)),
         _ if is(0xFFC0_0000, 0xA980_0000) => format!("stp {}, {}, [{}, #{imm7}]!", x(d), x(t2), sp(n)),

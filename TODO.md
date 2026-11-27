@@ -7070,12 +7070,20 @@ and an allocation on one card does not matter; `FIXPT_GC_TRACE` gives
 both counts. An arm64 barrier, which marks unconditionally, will need to
 test first, as x86_64's does.
 
-Not yet: arm64 (the user's choice, 2026-11-14: x86_64 merged first). Its
-barriers still mark every store's card and count none, so the budget
-there is spent only by the Rust machines' stores; correct, a card marked
-too many only scanned. Its `stored`, Rust's and FX-26's, would be held
-equal byte for byte here, but no arm64 code runs on this machine: to be
-run on one before it merges. Found on the way: the machines never
+Built for arm64 too (2026-11-27, on the arm64 Mac, §314): `arm64::barrier`,
+after the store, as x86_64's `stored` tests (the place young; the value
+no reference, or no younger; young onto a dirty card: nothing), else the
+heap's store again, `barrier_store`, `x0`-`x17` and the link kept, the
+allocation limit it gives written back; its jumps' offsets fixed by its
+52 words. FX-26's `arm-barrier` word for word (`tests/arm64.rs`), at
+each arm64 site of the cellular, register-code and direct compilers,
+Rust's and FX-26's (`n-barrier`, `ada-barrier`), each with the stored
+value's register and three scratch (`x13`, `x16`, `x17`). Before, the
+arm64 barriers marked every store's card and counted none, so on the
+arm64 Mac `remembered_set` failed on every machine from the day it came
+(a collection scanning 78 to 110 of the barrier's cards against 32): its
+native front end, made by the Rust direct compiler, the most of them.
+Found on the way, earlier: the machines never
 collected at the same points (they allocate differently: 330 to 518
 minor collections of one program at a 4096-word nursery), so one rule
 makes the budget the same everywhere, not the points; and
@@ -9194,7 +9202,14 @@ real, its declared effect says it, `(read @heap)`, and so should
 the bug. Bisect from before 2026-11-20 (each step a release build of a
 worktree with its own `CARGO_TARGET_DIR`, about two minutes).
 
-## 314. The remembered set's bound: a minor collection scans past its budget, on every machine (found 2026-11-26, failing on the arm64 Mac since at least 2026-11-20)
+## 314. ~~The remembered set's bound: a minor collection scans past its budget, on every machine~~ (found 2026-11-26, failing on the arm64 Mac since 2026-11-14; done 2026-11-27)
+
+**Done: §276's arm64 half,** which was not built (the user's choice,
+2026-11-14: x86_64 first); its test, `remembered_set.rs`, ran on arm64
+anyway and failed there from the commit that added it (`c4110b09`, whose
+trace counted none of the barrier's cards, so a bisect finds it good).
+Built now on this machine: §276, "Built for arm64 too". Every machine
+passes. What follows is the report as found.
 
 `fixpt-cli::remembered_set::on_*`, eleven tests, one a machine, fail: a
 minor collection of `programs/gc/cards.fx` (fresh lists stored into 1000
