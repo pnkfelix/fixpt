@@ -8,7 +8,6 @@
 ;;; only what Rust calls of them is named at top level: a module bound at
 ;;; top level has its whole type shown, and the types of modules are large.
 
-
 ;; What a `.fasl` not used is answered (`TODO.md` §299): its file read from
 ;; source, or its load refused, saying why. A policy is given the `.fasl`,
 ;; its file, why it is not used, whether that says it is not as a build left
@@ -17,9 +16,8 @@
 ;; may write (the user's, 2026-11-18).
 (define-type stale-answer (sumof (source unit) (refuse unit)))
 (define-type stale-policy (subr (io stderr) (string string string bool bool) stale-answer))
-;; The files a phase-1 form's text loads, as `phase1.rs` gives them
-;; (`loads_list`): where each load is, its file's base (0 if not read), why
-;; not, its path, its text and its key.
+;; The files a phase-1 form's or staged code's text loads (`loads_list`): where
+;; each load is, its file's base (0 if not read), why not, its path, text and key.
 (define-type loads-given
   (listof (productof (1 int) (2 int) (3 string) (4 string) (5 string) (6 string)) acyclic))
 
@@ -440,6 +438,28 @@
                    (named (listof (productof (1 symbol) (2 (bytevectorof @t))) acyclic)))
             (let ((p (begin (global-shapes forms (not globals) named) (parse-program keys forms))))
               (begin ((with check-synth k-macro-uses!) (with-macro-uses)) (keys-mirrored!) p))))
+         ;; The files a phase-1 step's or staged code's text loads (`loads-given`),
+         ;; each read by this front end's reader at its base: as
+         ;; `loaded-files!` takes a program's, the last read first.
+         (step-loaded
+          (lambda ((given loads-given))
+            (letrec ((go (subr (maxeff (read @globals) spin (alloc @s) (read @s) (write @s)
+                                       (read @m) (write @m) (read @c) (alloc @c) (goto @e)
+                                       (comefrom @e))
+                               (loads-given) (select parser-types loaded-files))
+                       (lambda (gs)
+                         (if (null? gs)
+                             nil
+                             (let* ((g (car gs)) (base (extract g 2)) (path (extract g 4))
+                                    (read (if (> base 0) (read-text-at (extract g 5) base) nil))
+                                    (ok (not (null? read)))
+                                    (why (cond (ok "") ((= base 0) (extract g 3))
+                                               (else (string-append "`" path "` does not read")))))
+                               (cons (product (1 (extract g 1)) (2 (if ok base 0)) (3 why) (4 path)
+                                              (5 (if ok (car read) nil)) (6 (extract g 5))
+                                              (7 (extract g 6)) (8 #f))
+                                     (go (cdr gs))))))))
+              (go given))))
          ;; The evaluator.
          (eval-values ((load-input "fx26:eval-values.fx") check-types))
          (eval-prims ((load-input "fx26:eval-prims.fx") eval-values tables check-types))
@@ -447,7 +467,7 @@
          (eval-core
           ((load-input "fx26:eval-core.fx")
            eval-values eval-prims eval-bloblets check-env check-resolve read-text-at
-           parse-program))
+           parse-program (lambda ((given loads-given)) (loaded-files! (step-loaded given)))))
          ;; The compiler's loop over a program's forms.
          (compile-programs
           ((load-input "fx26:compile-programs.fx")
@@ -618,12 +638,14 @@
             ;; standard environment's (`begun`), with `rep` (`with-reps`),
             ;; under its convention, by `mode` (`keys-in`).
             (lambda ((standard (listof syn acyclic)) (whole string) (k int) (len int)
-                     (native bool) (registers bool) (rep (bytevectorof @t)) (mode int))
+                     (native bool) (registers bool) (rep (bytevectorof @t)) (mode int)
+                     (given loads-given))
               (let ((read (read-text-at whole 0)))
                 (if (null? read)
                     (fail (sum unread #u) "the code is not one whole expression" 0 len)
                     (begin
-                      (loaded-files! nil)
+                      ;; The files it loads (`given`), each its own (`stage.rs`).
+                      (loaded-files! (step-loaded given))
                       (includes-given! nil)
                       ((with check-print-parts check-conv-native!) native)
                       (tagcase (let ((s ((with readings with-reps) (begun standard) rep nil)))
@@ -679,28 +701,6 @@
          ;; (`check-more-with`); and `named`, the names its text gives its
          ;; types, each a rep (`set-step-named!`). What each gives, or why
          ;; not, placed in the code.
-         ;; The files a step's text loads (a phase-1 form's, `loads-given`),
-         ;; each read by this front end's reader at its base: as
-         ;; `loaded-files!` takes a program's, the last read first.
-         (step-loaded
-          (lambda ((given loads-given))
-            (letrec ((go (subr (maxeff (read @globals) spin (alloc @s) (read @s) (write @s)
-                                       (read @m) (write @m) (read @c) (alloc @c) (goto @e)
-                                       (comefrom @e))
-                               (loads-given) (select parser-types loaded-files))
-                       (lambda (gs)
-                         (if (null? gs)
-                             nil
-                             (let* ((g (car gs)) (base (extract g 2)) (path (extract g 4))
-                                    (read (if (> base 0) (read-text-at (extract g 5) base) nil))
-                                    (ok (not (null? read)))
-                                    (why (cond (ok "") ((= base 0) (extract g 3))
-                                               (else (string-append "`" path "` does not read")))))
-                               (cons (product (1 (extract g 1)) (2 (if ok base 0)) (3 why) (4 path)
-                                              (5 (if ok (car read) nil)) (6 (extract g 5))
-                                              (7 (extract g 6)) (8 #f))
-                                     (go (cdr gs))))))))
-              (go given))))
          (session-step-of
           (lambda ((standard (listof syn acyclic)) (mode int) (s int) (whole string) (k int)
                    (len int) (how int) (name symbol) (make bool) (deferred bool) (native bool)

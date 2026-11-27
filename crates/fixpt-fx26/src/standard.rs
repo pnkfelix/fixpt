@@ -291,7 +291,9 @@ pub const ENTRIES: &[(&str, &str)] = &[
         "%stage-check",
         concat!(
             "(poly ((r region)) (subr (maxeff spin (io fs-read) (read r)) (string string wcell ",
-            "(listof (bytevectorof r) acyclic)) (sumof (checked string) (failed stage-failure))))",
+            "(listof (bytevectorof r) acyclic)) (sumof (checked (productof (1 string) ",
+            "(2 (listof (productof (1 int) (2 int) (3 string) (4 string) (5 string) (6 string)) acyclic)))) ",
+            "(failed stage-failure))))",
         ),
     ),
     // Sessions on the evaluator written in FX-26 (`fx-ast-eval`), which
@@ -318,6 +320,10 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // the procedure that evaluates it, or a definition, pending;
     // `session-commit!` one over `%session-ready`, the initializer the
     // program runs, then `%session-committed!`.
+    // Where a path a staged `load-module` names is from, if relative; the
+    // evaluator's (`fx-ast-eval`), whose own effects have no `stage`.
+    ("stage-directory!", "(subr stage (string) unit)"),
+    ("%stage-eval-directory!", "(subr (io fs-read) (string) unit)"),
     ("make-session", "(poly ((r region)) (poly ((m type)) (subr (alloc r) (m) (sessionof m r))))"),
     ("%session-check", "(poly ((e effect) (t type)) (poly ((m type) (r region) (g type)) (subr (maxeff stage spin (read r)) ((sessionof m r) datum g) (sumof (ok (sumof (expression (subr e () t)) (definition (pending e r)))) (failed stage-failure)))))"),
     ("session-redefines", "(poly ((m type) (r region) (e effect)) (subr (read r) ((sessionof m r) (pending e r)) (sumof (fresh unit) (redefines session-redefinition))))"),

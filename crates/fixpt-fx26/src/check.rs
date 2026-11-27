@@ -658,6 +658,10 @@ pub struct Checker {
     pub(crate) with_depth: usize,
     /// Those globals: seen from a loaded file, which sees no other.
     pub(crate) shared_globals: HashSet<Sym>,
+    /// Whether the code checked is staged (`stage.rs`), the modules of the
+    /// files it loads made as it is staged: reading one, a value made
+    /// before the code and never changed, is not the code's effect.
+    pub(crate) staged: bool,
     /// The hidden globals' definitions made since the form being checked
     /// began, to run before it (`top_defining`; a driver calling `top`
     /// takes them).
@@ -1526,6 +1530,7 @@ impl Checker {
             run_items: 0,
             with_depth: 0,
             shared_globals: HashSet::default(),
+            staged: false,
             hoisted: Vec::new(),
             loaded: HashMap::default(),
             in_built_in: 0,
@@ -3501,7 +3506,7 @@ impl Checker {
         if self.recursive.contains(&(s, t)) {
             e.0.insert(Atom::Spin);
         }
-        if self.globals_effects && self.env.rpos(s).is_some_and(|i| self.global_slots.contains(&i)) {
+        if self.globals_effects && !(self.staged && self.shared_globals.contains(&s)) && self.env.rpos(s).is_some_and(|i| self.global_slots.contains(&i)) {
             e.0.insert(Atom::Read(Region::Global(s)));
         }
         e

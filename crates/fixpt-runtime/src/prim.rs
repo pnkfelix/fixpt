@@ -3623,6 +3623,18 @@ prims! {
         };
         Ok(fx26_sum(rt, tag, v))
     });
+    // Last, so that no call-out's number before it moves. Where a path a staged `load-module` names is from, if relative
+    // (`stage-directory!`, `docs/fx26.md`, "Staging code"): a relative one
+    // from where it was, as `cd` takes one.
+    "%fx26-stage-directory!", 1, Some(1), simple!(|rt, a| {
+        let dir = std::path::PathBuf::from(get_string(rt, a[0])?);
+        let dir = match &rt.stage_dir {
+            Some(d) if dir.is_relative() => d.join(dir),
+            _ => dir,
+        };
+        rt.stage_dir = Some(dir);
+        Ok(Value::UNIT)
+    });
 }
 
 /// Promise states. `[state, payload]`.

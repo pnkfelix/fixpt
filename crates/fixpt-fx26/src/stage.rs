@@ -175,10 +175,12 @@ fn compiled(rt: &mut Runtime, w: &Wrapped, rep: &[u8]) -> Result<Result<Value, V
     let whole = rt.heap.make_string(&w.whole);
     rt.heap.push_root(whole);
     let rep = rt.heap.make_bytevector(rep);
-    let (check, settings, whole) = (rt.heap.root_at(base), rt.heap.root_at(base + 1), rt.heap.root_at(base + 2));
+    rt.heap.push_root(rep);
+    let given = staged_loads(rt, &w.whole);
+    let (check, settings, whole, rep) = (rt.heap.root_at(base), rt.heap.root_at(base + 1), rt.heap.root_at(base + 2), rt.heap.root_at(base + 3));
     rt.heap.pop_roots_to(base);
     let field = |rt: &Runtime, i: usize| rt.heap.product_field(settings, i);
-    let args = [field(rt, 1), whole, Value::fixnum(w.skip), Value::fixnum(w.len), field(rt, 2), field(rt, 3), rep, Value::fixnum(crate::ids::mode() as i64)];
+    let args = [field(rt, 1), whole, Value::fixnum(w.skip), Value::fixnum(w.len), field(rt, 2), field(rt, 3), rep, Value::fixnum(crate::ids::mode() as i64), given];
     // The front end is licensed code, which ends: no step limit of the
     // program's is its.
     let fuel = std::mem::replace(&mut rt.word_fuel, u64::MAX);
@@ -257,11 +259,43 @@ pub fn lower_staged(rt: &mut Runtime, staged: Value, given: Value) -> Result<Val
         Ok(done) => done,
         Err(refused) => return Ok(refused),
     };
-    let code = crate::session::lower_top(&c, &mut crate::lower::Globals::default(), &top);
+    // Its globals its own (the modules of the files it loads, defined
+    // first), by a prefix of this staging's: never the program's, whose
+    // loads of the same files are other modules.
+    let mut globals = crate::lower::Globals::with_prefix(&format!("fx:stage{}:", STAGINGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    let mut forms = Vec::new();
+    for (t, _) in &c.hoisted {
+        forms.extend(crate::session::lower_top(&c, &mut globals, t).0);
+    }
+    let code = crate::session::lower_top(&c, &mut globals, &top);
     let [sx] = &code.0[..] else { return Err("the staged code lowered to more than one form".to_string()) };
-    let datum = sx_value(rt, sx);
+    let datum = if forms.is_empty() {
+        sx.clone()
+    } else {
+        forms.push(sx.clone());
+        crate::sx::Sx::List(std::iter::once(crate::sx::Sx::sym("begin")).chain(forms).collect())
+    };
+    let datum = sx_value(rt, &datum);
     Ok(rt.heap.cons(datum, Value::NULL))
 }
+
+/// The files staged code `whole` loads, and theirs, read now from the
+/// directory staging is given (`stage-directory!`), as the front end that
+/// checks it takes them (`loads-given`, `step-loaded`): each a module of
+/// this staging's own, its key marked so, so that its hidden global is never
+/// the program's of the same file (`docs/research/eval.md`, "Decided (the
+/// user's, 2026-11-26)").
+fn staged_loads(rt: &mut Runtime, whole: &str) -> Value {
+    let mut loads = crate::syn::loads_given(whole, rt.stage_dir.clone());
+    let n = STAGINGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    for l in &mut loads {
+        l.key = format!("{}@stage{n}", l.key);
+    }
+    crate::phase1::loads_list(rt, &loads)
+}
+
+/// How many stagings have been made, each its globals' mark.
+static STAGINGS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// `stage` on the evaluator written in FX-26 (`fx-ast-eval`), what
 /// `%fx26-stage-check` does with the code, written out, the names of the
@@ -277,9 +311,18 @@ pub fn check_staged(rt: &mut Runtime, text: &str, given: &fixpt_runtime::evidenc
     let w = stage_wrapped(text);
     match checked(rt, &w, &rep) {
         Ok(_) => {
-            let tag = rt.heap.intern("checked");
+            // The text, and the files it loads, for the evaluator's parser.
+            let given = staged_loads(rt, &w.whole);
+            let base = rt.heap.push_root(given);
             let whole = rt.heap.make_string(&w.whole);
-            rt.heap.make_frozen(SUM, &[tag, whole])
+            rt.heap.push_root(whole);
+            let (given, whole) = (rt.heap.root_at(base), rt.heap.root_at(base + 1));
+            let both = rt.heap.make_frozen(PRODUCT, &[whole, given]);
+            rt.heap.push_root(both);
+            let tag = rt.heap.intern("checked");
+            let both = rt.heap.root_at(base + 2);
+            rt.heap.pop_roots_to(base);
+            rt.heap.make_frozen(SUM, &[tag, both])
         }
         Err(refused) => refused,
     }
@@ -292,6 +335,12 @@ pub fn check_staged(rt: &mut Runtime, text: &str, given: &fixpt_runtime::evidenc
 pub(crate) fn checked(rt: &mut Runtime, w: &Wrapped, rep: &[u8]) -> Result<(crate::check::Checker, crate::top::Top), Value> {
     let failed = fixpt_runtime::prim::stage_failed;
     let mut c = crate::check::Checker::new();
+    // A file the code loads is read as staging runs, from the directory
+    // staging is given (`stage-directory!`), into a module of its own: the
+    // checker's own, never the program's (`docs/research/eval.md`,
+    // "Decided (the user's, 2026-11-26)").
+    c.base_dir = rt.stage_dir.clone();
+    c.staged = true;
     let t = fixpt_reps::binary::decode(rep, fixpt_reps::heap::validate_all()).and_then(|r| c.import_rep(&r, &[]));
     match t {
         Ok(t) => {

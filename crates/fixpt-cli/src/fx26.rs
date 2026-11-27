@@ -1000,6 +1000,9 @@ fn run_files_in(session: &mut Fx26Session, files: &[String], args: &[String]) ->
         // `import-with-syntax` is read as its forms are (Heist's report,
         // 2026-11-18: read from the working directory).
         let dir = std::path::Path::new(f).parent().map(|d| d.to_path_buf());
+        // Staged code's loads are from the program's directory too, until it
+        // says otherwise (`stage-directory!`).
+        session.scheme.runtime_unrooted().stage_dir = dir.clone().filter(|d| !d.as_os_str().is_empty());
         let outer = std::mem::replace(&mut session.checker.base_dir, dir);
         let forms = match session.read_program(FileId(0), &text) {
             Ok(forms) => forms,

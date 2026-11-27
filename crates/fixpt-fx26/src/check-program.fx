@@ -811,6 +811,7 @@
       (set k-stage-mark (k-mark)) (set k-stage-defs (k-defs-snapshot))
       (set k-stage-broken (get k-broken)) (set k-stage-uses (get k-last-uses))
       (set k-stage-dscope (get k-dscope))
+      (set k-checking-staged #t)
       (check-more-with forms rep))))
 ;; What the stage `check-staged` checked last bound, undone.
 (define check-staged-undo! (->* () unit)

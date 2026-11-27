@@ -410,7 +410,7 @@ impl Phase1 {
 /// `loads` as the step takes them (`session-step`'s `given`): a list of
 /// `(product here base why path text key)`, the last read first, as
 /// `loaded-files!` takes a program's.
-fn loads_list(rt: &mut Runtime, loads: &[crate::syn::LoadGiven]) -> Value {
+pub(crate) fn loads_list(rt: &mut Runtime, loads: &[crate::syn::LoadGiven]) -> Value {
     let mut l = Value::NULL;
     for g in loads {
         let base = rt.heap.push_root(l);

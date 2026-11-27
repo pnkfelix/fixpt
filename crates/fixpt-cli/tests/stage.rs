@@ -139,6 +139,21 @@ fn staged_code_sees_the_modules_included() {
     }
 }
 
+/// Staged code that loads files (`programs/stage/loads.fx`): each a module
+/// made afresh from the file's text as staging reads it, from the program's
+/// directory or the one `stage-directory!` names, its own loads one module a
+/// path within it; reading one is not the code's effect; a file not there
+/// refused (`docs/research/eval.md`, "Decided (the user's, 2026-11-26)").
+#[test]
+fn staged_code_loads_files() {
+    let want = "42\n10\n7\nrefused: cannot read `loads/missing.fx`: No such file or directory (os error 2)\n3\n";
+    let runs: Vec<_> = STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run(m, "loads.fx")))).collect();
+    for (m, t) in runs {
+        let (status, out, err) = t.join().expect("ran");
+        assert_eq!((status, out.as_str()), (Some(0), want), "{m}: {err}");
+    }
+}
+
 /// A process stages code while another runs, at tiny time slices: the
 /// checker is not the program, and no poll in it switches to the program's
 /// tasks (`TODO.md` §187: on native code, it ran them on a machine that

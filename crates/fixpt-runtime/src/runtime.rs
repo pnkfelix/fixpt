@@ -87,6 +87,10 @@ pub struct Runtime {
     /// when it stays cellular. None: staged code runs as the cellular code
     /// it is compiled to, as the program's does.
     pub stage_native: Option<StageNative>,
+    /// Where a path a staged `load-module` names is from, if relative
+    /// (`stage-directory!`; the CLI's, the directory of the program run).
+    /// None: the working directory's.
+    pub stage_dir: Option<std::path::PathBuf>,
     /// How `%fx26-dump-heap` dumps the heap to a file, with the procedure a
     /// resumed run starts at (`TODO.md` §189; `fixpt-fx26` installs it,
     /// where its front end is native code). None: it says it cannot.
@@ -233,6 +237,7 @@ impl Runtime {
             procedural: None,
             dump_heap: None,
             stage_native: None,
+            stage_dir: None,
             word_fuel: u64::MAX,
             run_nanos: 0,
             compile_nanos: 0,
@@ -330,6 +335,7 @@ impl Runtime {
             procedural: None,
             dump_heap: None,
             stage_native: None,
+            stage_dir: None,
             word_fuel: u64::MAX,
             run_nanos: 0,
             compile_nanos: 0,

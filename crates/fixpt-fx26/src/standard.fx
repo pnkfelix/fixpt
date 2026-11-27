@@ -474,6 +474,7 @@
          (("flatarray-length") "%fx26-flatarray-length")
          (("terminal-restore") "%fx26-terminal-restore")
          (("native-procedure") "%fx26-native-procedure")
+         (("stage-directory!") "%fx26-stage-directory!")
          (("bytevector-copy!") "%fx26-bytevector-copy!")
          (("utf8-byte-length") "%fx26-utf8-byte-length")
          (("arithmetic-shift") "%fx26-arithmetic-shift")
@@ -517,6 +518,7 @@
          (else "")))
       ((22)
        (case n
+         (("%stage-eval-directory!") "%fx26-stage-directory!")
          (("datum-list->bytevector") "%fx26-bytevector")
          (else "")))
       ((23)

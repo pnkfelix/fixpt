@@ -33,7 +33,14 @@
                             (listof (listof (select parser-types syn) acyclic) acyclic)))
            (parse (subr (select eval-types evals)
                         ((select parser-types keys) (listof (select parser-types syn) acyclic))
-                        (select parser-types keyed))))
+                        (select parser-types keyed)))
+           ;; The files the next parse's text loads, as `stage` gives them
+           ;; (`%stage-check`): where each load is, its file's base, why not
+           ;; read, its path, its text and its key.
+           (loads! (subr (select eval-types evals)
+                         ((listof (productof (1 int) (2 int) (3 string) (4 string) (5 string)
+                                             (6 string)) acyclic))
+                         unit)))
     (module
 (hide (include eval-types) (include parser-types) (include check-env-types)
       (include check-resolve-types) (include check-types-types) (include check-subst-types)
@@ -151,6 +158,22 @@
 ;; Where the code `stage` runs is read from: past any place of a program's,
 ;; so that no fact of the program's is taken for one of it.
 (define ev-stage-base int 1000000000000)
+;; The files staged code loads, as `%stage-check` gives them: where each
+;; load is, its file's base (0 if not read), why not, its path, text and key.
+(define-type ev-loads
+  (listof (productof (1 int) (2 int) (3 string) (4 string) (5 string) (6 string)) acyclic))
+;; Staged code's loads, each where the code is read, and each file read
+;; past it too (`ev-stage-base`): past every place of the program's own
+;; files, so that no fact of theirs is taken for one of these.
+(define ev-moved-loads (->* (ev-loads) ev-loads)
+  (lambda (ls)
+    (if (null? ls)
+        nil
+        (let* ((l (car ls)) (base (extract l 2)))
+          (cons (product (1 (+ ev-stage-base (extract l 1)))
+                         (2 (if (> base 0) (+ ev-stage-base base) base))
+                         (3 (extract l 3)) (4 (extract l 4)) (5 (extract l 5)) (6 (extract l 6)))
+                (ev-moved-loads (cdr ls)))))))
 ;; Whether `n` is bound in `e`, not the standard one.
 (define ev-bound? (->* (env symbol) bool)
   (lambda (e n) (and (not (null? e)) (or (symbol=? (car (car e)) n) (ev-bound? (cdr e) n)))))
@@ -474,7 +497,7 @@
                           (gr (listof (bytevectorof @v) acyclic)) (rp wcell))
                    (tagcase (%stage-check text ns rp gr)
                      (failed f (ev-stage-failure f))
-                     (checked w (ev-stage-run w m)))))))
+                     (checked w (ev-stage-run (extract w 1) (extract w 2) m)))))))
   ;; A `reify-…`'s call, of the evidence it is given: what the checker
   ;; noted at it, the effect (or a region), or the type, given the evidence.
   (ev-reify (->* (bool (listof exp acyclic) env) val)
@@ -543,19 +566,31 @@
                      (failed f (ev-stage-failure f)))))))
   ;; The code as checked, `w`, read, parsed and run in no environment but
   ;; the standard one: the procedure of the module it makes, given `m`.
-  (ev-stage-run (->* (string val) val)
-    (lambda (w m)
+  ;; The files it loads, `given`, read by the parse, their places moved to
+  ;; where it is read (`ev-moved-loads`); its forms run (`ev-stage-tops`).
+  (ev-stage-run (->* (string ev-loads val) val)
+    (lambda (w given m)
       (let ((read (read-text w ev-stage-base)))
         (if (null? read)
             (ev-stage-refused "the code as checked does not read")
-            (tagcase (extract (parse ev-keys (car read)) 1)
-              (p-err (msg a b) (ev-stage-refused msg))
-              (p-ok (tops)
-                (if (null? tops)
-                    (ev-stage-refused "the code as checked is no form")
-                    (tagcase (car tops)
-                      (t-exp (x) (the val (o-sum 'ok (apply1 (eval x (the env nil)) m))))
-                      (else y (ev-stage-refused "the code as checked is not an expression"))))))))))
+            (let ((parsed (begin (loads! (ev-moved-loads given))
+                                 (let ((p (extract (parse ev-keys (car read)) 1)))
+                                   (begin (loads! nil) p)))))
+              (tagcase parsed
+                (p-err (msg a b) (ev-stage-refused msg))
+                (p-ok (tops) (ev-stage-tops (the vglobals (new nil)) (get ev-top) tops m))))))))
+  ;; Staged code's forms run: the definitions before the code, its files'
+  ;; modules' hidden globals, in globals `g` of its own, which the code, the
+  ;; last, runs in, given `m`; `top` the top level again after each.
+  (ev-stage-tops (->* (vglobals vglobals (listof top acyclic) val) val)
+    (lambda (g top ts m)
+      (cond ((null? ts) (ev-stage-refused "the code as checked is no form"))
+            ((null? (cdr ts))
+             (tagcase (car ts)
+               (t-exp (x) (the val (o-sum 'ok (apply1 (eval x (get g)) m))))
+               (else y (ev-stage-refused "the code as checked is not an expression"))))
+            (else (begin (eval-top-in g (car ts)) (set ev-top top)
+                         (ev-stage-tops g top (cdr ts) m))))))
   (eval-module (->* (mod-items env) val)
     (lambda (items e)
       (let ((inner (open-names (module-names items) e)))
@@ -843,6 +878,9 @@
 (define ev-session-prims! (->* () unit)
   (lambda ()
    (begin
+    ;; Where a staged `load-module`'s path is from.
+    (prim! 'stage-directory!
+           (lambda (xs) (begin (%stage-eval-directory! (as-str (car xs))) the-unit)))
     ;; A session of module `m`.
     (prim! 'make-session
            (lambda (xs)

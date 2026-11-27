@@ -240,6 +240,8 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("%session-eval-make", "%fx26-make-session", false),
     ("%session-eval-committed!", "%fx26-session-committed!", false),
     ("make-session", "%fx26-make-session", false),
+    ("stage-directory!", "%fx26-stage-directory!", false),
+    ("%stage-eval-directory!", "%fx26-stage-directory!", false),
     ("%session-check", "%fx26-session-check", false),
     ("session-redefines", "%fx26-session-redefines", false),
     ("%session-ready", "%fx26-session-ready", false),

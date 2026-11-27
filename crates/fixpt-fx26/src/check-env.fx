@@ -65,6 +65,10 @@
 ;; of it is linked as a global's is (`k-link-global-select`).
 (define k-fixed k-flags (new (make-table symbol-hash symbol=?)))
 (define k-globals-effects (ref bool @t) (new #t))
+;; Whether the code checked is staged (`check-staged`), the modules of the
+;; files it loads made as it is staged: naming one's hidden global, a value
+;; made before the code and never changed, is not the code's effect.
+(define k-checking-staged (ref bool @t) (new #f))
 ;; The latent effect of the lambda checked last: for `define*`, what the
 ;; globals its lambda reads are.
 (define k-last-latent (ref k-eff @t) (new nil))
