@@ -452,6 +452,32 @@ as fixed, as the native tier's direct calls do, without a way to undo
 that. Deferred unless an editor needs it; a module of what user code
 should see is also the better interface.
 
+### Decided (the user's, 2026-11-26): staged code sees `m`, and loads afresh
+
+Heist's request (`heist/docs/requests/fixpt-live-modules.md`) asked that a
+staged `(load-module "f.fx")` of a path the program loaded give the
+program's own instance. Refused: staged code sees the standard
+environment and `m`'s names alone, so what it reaches of the program is
+what the program passed it, as `m` or within `m`, never what it can name
+by a path. A program that wants staged code to use one of its modules
+passes it (with a way to name a module's type, Heist's gap 4, that is a
+line, not a restatement).
+
+Staged code may still `(load-module "f.fx")`: it makes a module that
+matches the file's current text, read as staging runs, `.fasl`s reused
+by digest as anywhere. The read is the `load-module` in the code being
+made code, so it is `stage`'s (the effect atom's: making code the program
+can run, and reading what that code names), not an `(io fs-read)` every
+program that stages would have to declare for code it has not seen. Making
+the module, as the staged code runs, is the code's own, within `E`. Its meaning is
+always a fresh instance: its generative types new, its state its own.
+Giving back the program's cached instance instead is an optimization,
+allowed only where it is known to be sound, that is, where no program
+could tell the two apart. Plausibly (not yet shown): the file and its
+loads unchanged (their stamps), and the module making no state, doing
+nothing observable as it is made, and defining no generative types. Until
+that is shown, always fresh.
+
 ## Fixpt
 
 What exists:

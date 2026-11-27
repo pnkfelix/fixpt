@@ -126,6 +126,19 @@ fn a_stage_takes_the_programs_generative_types() {
     }
 }
 
+/// What staged code sees made of the modules a file is given, each
+/// `include`d (`programs/stage/included/`): their names and types, none
+/// restated, and an effect beyond the stage's refused.
+#[test]
+fn staged_code_sees_the_modules_included() {
+    let want = "new 40\nrefused: a (subr spin ((select stage-module pt)) string) is expected here, and this is a (subr (io stdout) ((select stage-module pt)) string)\n  beyond what is expected, it has (io stdout)\nnew 40\n";
+    let runs: Vec<_> = STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run(m, "included.fx")))).collect();
+    for (m, t) in runs {
+        let (status, out, err) = t.join().expect("ran");
+        assert_eq!((status, out.as_str()), (Some(0), want), "{m}: {err}");
+    }
+}
+
 /// A process stages code while another runs, at tiny time slices: the
 /// checker is not the program, and no poll in it switches to the program's
 /// tasks (`TODO.md` §187: on native code, it ran them on a machine that
