@@ -3967,6 +3967,9 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         if let Some(first) = forms.first() {
             warn_unmarked(first, path, &text, &self.interner);
         }
+        if crate::built_in_module(path).is_none() {
+            warn_bare_labels(path, &text);
+        }
         let made = if input { self.modules_made(&forms) } else { None };
         let r = if input {
             match &forms[..] {
@@ -5084,6 +5087,23 @@ pub(crate) fn binder_included(b: &Syn, interner: &fixpt_read::Interner) -> bool 
         Some([_, _]) => true,
         Some([_, _, q]) => binder_mark(q, interner) == Some(true),
         _ => false,
+    }
+}
+
+/// The first sum label module file `path` (as written), of text `text`,
+/// writes bare, and how many more, warned of once a thread each
+/// (`crate::labels`).
+fn warn_bare_labels(path: &str, text: &str) {
+    thread_local! {
+        static SAID: std::cell::RefCell<fixpt_hash::HashSet<String>> = std::cell::RefCell::new(fixpt_hash::HashSet::default());
+    }
+    let Some((at, label, more)) = crate::labels::bare_labels(text) else { return };
+    let before: String = text.chars().take(at).collect();
+    let line = before.matches('\n').count() + 1;
+    let col = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
+    let said = format!("in `{path}`, {line}:{col}: {}", crate::labels::bare_label_warning(&label, more));
+    if SAID.with(|s| s.borrow_mut().insert(said.clone())) {
+        eprintln!("fixpt: {said}");
     }
 }
 

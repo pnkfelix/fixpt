@@ -1,0 +1,7 @@
+(define m (load-module "m.fx"))
+(define-type t (sumof (#:ok int) (bad string)))
+(define a t (sum #:ok 1))
+(define b t (sum bad "x"))
+(define q (quote (sumof (z int))))
+(define-datatype shape (circle int))
+(tagcase a (ok n n) (bad s 0))

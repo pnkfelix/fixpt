@@ -100,6 +100,15 @@ fn place(name: &str, text: &str, span: fixpt_read::Span) -> String {
     }
 }
 
+/// A warning, on the standard error, of the first sum label a program's file
+/// writes bare, `ok` for `#:ok`, and how many more (`fixpt_fx26::labels`).
+fn warn_bare_labels(name: &str, text: &str) {
+    if let Some((at, label, more)) = fixpt_fx26::labels::bare_labels(text) {
+        let (line, col) = line_col(text, at);
+        eprintln!("fixpt: {name}:{line}:{col}: {}", fixpt_fx26::labels::bare_label_warning(&label, more));
+    }
+}
+
 /// A warning, on the standard error, for each type a whole program defines
 /// more than once (`TODO.md` §34), at its second definition.
 fn warn_types_again(session: &mut Fx26Session, name: &str, text: &str, forms: &[Form]) {
@@ -1014,6 +1023,7 @@ fn run_files_in(session: &mut Fx26Session, files: &[String], args: &[String]) ->
         };
         // A file is a whole program: its definitions may come in any order.
         warn_types_again(session, f, &text, &forms);
+        warn_bare_labels(f, &text);
         let path = canonical(f);
         session.source_file = Some(std::rc::Rc::new((path, text.clone())));
         session.program_file = Some(std::path::PathBuf::from(f));
@@ -1561,6 +1571,7 @@ fn eval_program_in(session: &mut Fx26Session, name: &str, text: &str, raw: bool)
         }
     };
     warn_types_again(session, name, text, &forms);
+    warn_bare_labels(name, text);
     session.program_file = Some(std::path::PathBuf::from(name));
     let ran = session.run_forms(&forms);
     session.program_file = None;

@@ -1217,6 +1217,7 @@ pub mod phase1;
 pub mod sessions;
 pub(crate) mod sessions26;
 pub mod stage;
+pub mod labels;
 pub mod sx;
 pub mod typeat;
 pub mod query;
