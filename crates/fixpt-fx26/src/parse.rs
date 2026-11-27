@@ -879,8 +879,34 @@ impl Checker {
                 let inc = self.interner.intern("%include");
                 Ok(self.arena.ty(Ty::Select(inc, sym)))
             }
-            _ => Err(FxError::at(s.span(), format!("`{}` is not a type", self.name(sym)))),
+            _ => self.shared_abs_named(sym).ok_or_else(|| FxError::at(s.span(), format!("`{}` is not a type", self.name(sym)))),
         }
+    }
+
+    /// A loaded file's abstract type written as it is shown, `x.fx..t`,
+    /// which nothing else binds: as a session's step writes a definition's
+    /// type found by a trial (`sessions.rs`). The variable the module type of
+    /// a load bound now, of file `x.fx` (its key after the last `/`), gives
+    /// for `t`; none if no such load is bound. As `k-shared-abs-named`.
+    fn shared_abs_named(&mut self, sym: Sym) -> Option<TyId> {
+        let name = self.name(sym).to_string();
+        let (file, t) = name.rsplit_once("..")?;
+        let t = self.interner.get(t)?;
+        let globals: Vec<Sym> = self.shared_globals.iter().copied().collect();
+        for g in globals {
+            let key = self.name(g).strip_prefix("%shared:").unwrap_or_default();
+            let shown = key.rsplit_once('/').map_or(key.strip_prefix("input:").unwrap_or(key), |(_, f)| f);
+            if shown != file {
+                continue;
+            }
+            let Some(ty) = self.global_type(g) else { continue };
+            if let Ty::Module { abs, .. } = self.arena.get(self.arena.resolve(ty)).clone()
+                && let Some((_, v)) = abs.iter().find(|(n, _)| *n == t)
+            {
+                return Some(self.arena.ty(Ty::Var(*v)));
+            }
+        }
+        None
     }
 
     fn parse_type_list(&mut self, s: &Syn) -> R<TyId> {

@@ -452,11 +452,11 @@
                              nil
                              (let* ((g (car gs)) (base (extract g 2)) (path (extract g 4))
                                     (read (if (> base 0) (read-text-at (extract g 5) base) nil))
-                                    (ok (not (null? read)))
-                                    (why (cond (ok "") ((= base 0) (extract g 3))
+                                    (ok (not (null? read))) (kept (or ok (< base 0))) ; -1: made
+                                    (why (cond (kept "") ((= base 0) (extract g 3))
                                                (else (string-append "`" path "` does not read")))))
-                               (cons (product (1 (extract g 1)) (2 (if ok base 0)) (3 why) (4 path)
-                                              (5 (if ok (car read) nil)) (6 (extract g 5))
+                               (cons (product (1 (extract g 1)) (2 (if kept base 0)) (3 why)
+                                              (4 path) (5 (if ok (car read) nil)) (6 (extract g 5))
                                               (7 (extract g 6)) (8 #f))
                                      (go (cdr gs))))))))
               (go given))))

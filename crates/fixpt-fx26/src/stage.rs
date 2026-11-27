@@ -289,7 +289,7 @@ fn staged_loads(rt: &mut Runtime, whole: &str) -> Value {
     let mut loads = crate::syn::loads_given(whole, rt.stage_dir.clone());
     let n = STAGINGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     for l in &mut loads {
-        l.key = format!("{}@stage{n}", l.key);
+        l.key = format!("{}~stage{n}", l.key);
     }
     crate::phase1::loads_list(rt, &loads)
 }

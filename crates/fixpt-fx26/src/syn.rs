@@ -1063,7 +1063,7 @@ pub fn set_fasl_used(used: HashMap<String, String>) {
 
 /// The positions of one module file and the next apart, in the parser
 /// written in FX-26 (`parser-exps.fx`'s `load-base`).
-const LOAD_BASE_STEP: i64 = 1_000_000_000;
+pub(crate) const LOAD_BASE_STEP: i64 = 1_000_000_000;
 
 /// A load found in a text: where it starts, its path as written, whether
 /// it is a `load-input`, and, a `(%loaded "key" "path")`'s, the file its key

@@ -228,16 +228,143 @@ fn step_making(rt: &mut Runtime, base: usize, w: &Wrapped, how: i64, name: &str,
     // Only the names this step's text gives its types, each imported for it.
     let named: Vec<(String, Vec<u8>)> = STEP_NAMED.with(|n| n.borrow().iter().filter(|(name, _)| w.whole.contains(name.as_str())).cloned().collect());
     let named = named_list(rt, &named);
-    let [standard, whole, name, rep] = [0, 1, 2, 3].map(|i| rt.heap.root_at(mark + i));
+    rt.heap.push_root(named);
+    let (given, read) = step_loads(rt, base, &w.whole);
+    let [standard, whole, name, rep, named] = [0, 1, 2, 3, 4].map(|i| rt.heap.root_at(mark + i));
     rt.heap.pop_roots_to(mark);
-    let args = [standard, whole, Value::fixnum(w.skip), Value::fixnum(w.len), Value::fixnum(how), name, Value::boolean(made), Value::boolean(deferred), Value::boolean(native), Value::boolean(registers), rep, named, Value::fixnum(crate::ids::mode() as i64), Value::NULL];
+    let args = [standard, whole, Value::fixnum(w.skip), Value::fixnum(w.len), Value::fixnum(how), name, Value::boolean(made), Value::boolean(deferred), Value::boolean(native), Value::boolean(registers), rep, named, Value::fixnum(crate::ids::mode() as i64), given];
     let out = call(rt, base, E_STEP, &args)?;
     let tag = rt.heap.symbol_name(rt.heap.sum_tag(out));
     let payload = rt.heap.sum_payload(out);
-    Ok(match tag.as_str() {
-        "made" | "typed" | "checked" => Ok(payload),
-        _ => Err(out),
-    })
+    let ok = matches!(tag.as_str(), "made" | "typed" | "checked");
+    // A step kept has made its files' modules, which later steps use.
+    if ok && how != TRY {
+        let at = rt.heap.push_root(payload);
+        made_loads(rt, base, &read);
+        rt.heap.pop_roots_to(at);
+    }
+    Ok(if ok { Ok(payload) } else { Err(out) })
+}
+
+/// The files the step's text `whole` loads, and theirs, as `session-step`
+/// takes them (`loads-given`), read from the session's directory: each a
+/// module of the session's own, its key marked by the session's number, so
+/// that its hidden global is never the program's of the same file; one the
+/// session has made in a step it kept given as made (base -1), so that
+/// every load of a path in the session is one module. And the keys read.
+fn step_loads(rt: &mut Runtime, base: usize, whole: &str) -> (Value, Vec<String>) {
+    step_loads_by(rt, base, whole, fixpt_runtime::prim::SESSION_MADE)
+}
+
+/// The evaluator's (`%fx26-session-eval-loads`): the files the text
+/// `whole` loads, as its parser takes them (`step_loads`), those it has run
+/// none of the session's texts to make given as read, and noted as made,
+/// as it runs the text next.
+pub(crate) fn eval_loads(rt: &mut Runtime, base: usize, whole: &str) -> Value {
+    let slot = fixpt_runtime::prim::SESSION_EVAL_MADE;
+    let (given, read) = step_loads_by(rt, base, whole, slot);
+    let at = rt.heap.push_root(given);
+    made_loads_in(rt, base, &read, slot);
+    let given = rt.heap.root_at(at);
+    rt.heap.pop_roots_to(at);
+    given
+}
+
+/// [`step_loads`], the session's made files those its field `slot` holds.
+fn step_loads_by(rt: &mut Runtime, base: usize, whole: &str, slot: usize) -> (Value, Vec<String>) {
+    use fixpt_runtime::prim::{SESSION_NUMBER, session_dir};
+    let s = rt.heap.root_at(base);
+    let n = rt.heap.obj_ref(s, SESSION_NUMBER).as_fixnum();
+    let made: Vec<String> = rt.heap.list_to_vec(rt.heap.obj_ref(s, slot)).unwrap_or_default().into_iter().map(|k| rt.heap.string_to_rust(k)).collect();
+    let mut loads = crate::syn::loads_given(whole, session_dir(rt, s));
+    let mut read = Vec::new();
+    let mut texts = Vec::new();
+    for l in &mut loads {
+        l.key = format!("{}~session{n}", l.key);
+        if made.contains(&l.key) {
+            // Made, and its forms given too, at no load's place, for what
+            // the expander finds a load's module gives (`file-read-keyed`).
+            if l.base > 0 {
+                texts.push(crate::syn::LoadGiven { here: -1, base: l.base, why: String::new(), path: l.path.clone(), text: l.text.clone(), key: l.key.clone() });
+            }
+            l.base = -1;
+        } else if l.base > 0 {
+            read.push(l.key.clone());
+        }
+    }
+    loads.extend(texts);
+    (crate::phase1::loads_list(rt, &loads), read)
+}
+
+/// The modules of the files code `text` loads that the session at `base` has
+/// not made, made first, in a step of their own, so that the step after
+/// finds them made (`step_loads`), their types bound: a definition's,
+/// found by a trial and written in its form, may name them (`base.fx..id`).
+/// Making a module is pure, so one made for a step refused after changes
+/// nothing. Or why one cannot be.
+fn make_loads(rt: &mut Runtime, base: usize, text: &str, evaluated: bool) -> Result<Result<(), Value>, String> {
+    use fixpt_runtime::prim::{SESSION_MADE, SESSION_NUMBER, session_dir};
+    let s = rt.heap.root_at(base);
+    let n = rt.heap.obj_ref(s, SESSION_NUMBER).as_fixnum();
+    let made: Vec<String> = rt.heap.list_to_vec(rt.heap.obj_ref(s, SESSION_MADE)).unwrap_or_default().into_iter().map(|k| rt.heap.string_to_rust(k)).collect();
+    let dir = session_dir(rt, s);
+    // The text's own loads (a file's are below the first file's base).
+    let mut loads: Vec<String> = Vec::new();
+    for l in crate::syn::loads_given(text, dir.clone()) {
+        if l.here >= crate::syn::LOAD_BASE_STEP || made.contains(&format!("{}~session{n}", l.key)) {
+            continue;
+        }
+        let at = match &dir {
+            Some(d) if std::path::Path::new(&l.path).is_relative() && crate::built_in_module(&l.path).is_none() => d.join(&l.path),
+            _ => std::path::PathBuf::from(&l.path),
+        };
+        let input = l.key.starts_with("input:") && !crate::parse::takes_modules_at(&at, &l.path);
+        let path = l.path.replace('\\', "\\\\").replace('"', "\\\"");
+        let load = format!("(let ((%loaded ({} \"{path}\"))) #u)", if input { "load-input" } else { "load-module" });
+        if !loads.contains(&load) {
+            loads.push(load);
+        }
+    }
+    if loads.is_empty() {
+        return Ok(Ok(()));
+    }
+    let made_n = rt.heap.list_to_vec(rt.heap.obj_ref(rt.heap.root_at(base), SESSION_MADE)).map_or(0, |l| l.len());
+    let t = format!("(define %session-loads-{made_n} (lambda () (begin {} #u)))", loads.join(" "));
+    let w = Wrapped::of(String::new(), &t, "\n", &t, 0);
+    // On the evaluator, checked, and its text run first after (a seed's).
+    if evaluated {
+        return Ok(match step_checked(rt, base, &w)? {
+            Ok(_) => {
+                add_seed(rt, base, &t);
+                Ok(())
+            }
+            Err(refused) => Err(refused),
+        });
+    }
+    match step(rt, base, &w, MORE, "", false)? {
+        Ok(word) => {
+            let run = rt.run_word.ok_or("no cellular machine is installed")?;
+            run(rt, word, &[])?;
+            Ok(Ok(()))
+        }
+        Err(refused) => Ok(Err(refused)),
+    }
+}
+
+/// `keys` made by a step the session at `base` kept (`step_loads`).
+fn made_loads(rt: &mut Runtime, base: usize, keys: &[String]) {
+    made_loads_in(rt, base, keys, fixpt_runtime::prim::SESSION_MADE);
+}
+
+fn made_loads_in(rt: &mut Runtime, base: usize, keys: &[String], slot: usize) {
+    for k in keys {
+        let k = rt.heap.make_string(k);
+        let s = rt.heap.root_at(base);
+        let l = rt.heap.obj_ref(s, slot);
+        let l = rt.heap.cons(k, l);
+        let s = rt.heap.root_at(base);
+        rt.heap.obj_set(s, slot, l);
+    }
 }
 
 /// What `%fx26-session-check` does on this checker: an expression, the
@@ -256,6 +383,13 @@ pub(crate) fn check(rt: &mut Runtime, base: usize, staged: Value, given: Value) 
     let code = rt.heap.root_at(mark);
     rt.heap.pop_roots_to(mark);
     if let Err(refused) = made? {
+        return Ok(refused);
+    }
+    let mark = rt.heap.push_root(code);
+    let loaded = make_loads(rt, base, &code_text, false);
+    let code = rt.heap.root_at(mark);
+    rt.heap.pop_roots_to(mark);
+    if let Err(refused) = loaded? {
         return Ok(refused);
     }
     if is_definition(rt, code) {
@@ -435,6 +569,23 @@ pub(crate) fn ready(rt: &mut Runtime, base: usize, d: Value, decision: &str, eva
     }
 }
 
+/// `text` run among the seeds, after those there.
+fn add_seed(rt: &mut Runtime, base: usize, text: &str) {
+    let texts = rt.heap.obj_ref(rt.heap.root_at(base), S_TEXTS);
+    if !texts.is_pair() {
+        return;
+    }
+    let t = rt.heap.make_string(text);
+    let at = rt.heap.push_root(t);
+    let texts = rt.heap.obj_ref(rt.heap.root_at(base), S_TEXTS);
+    let mut seeds = rt.heap.list_to_vec(rt.heap.car(texts)).unwrap_or_default();
+    seeds.push(rt.heap.root_at(at));
+    let l = rt.heap.list_from(&seeds);
+    let texts = rt.heap.obj_ref(rt.heap.root_at(base), S_TEXTS);
+    rt.heap.set_car(texts, l);
+    rt.heap.pop_roots_to(at);
+}
+
 /// The seeds not yet run, taken: the texts that define `m`'s values.
 fn take_seeds(rt: &mut Runtime, base: usize) -> Vec<String> {
     let texts = rt.heap.obj_ref(rt.heap.root_at(base), S_TEXTS);
@@ -520,6 +671,13 @@ pub(crate) fn eval_check(rt: &mut Runtime, base: usize, a: &[Value]) -> Result<V
         Ok(_) => return Ok(failed(rt, "unread", "the code is not one whole expression")),
         Err(e) => return Ok(failed(rt, "unread", &e.message)),
     };
+    let mark = rt.heap.push_root(code);
+    let loaded = make_loads(rt, base, &code_text, true);
+    let code = rt.heap.root_at(mark);
+    rt.heap.pop_roots_to(mark);
+    if let Err(refused) = loaded? {
+        return Ok(refused);
+    }
     if is_definition(rt, code) {
         return check_define(rt, base, code, &code_text);
     }

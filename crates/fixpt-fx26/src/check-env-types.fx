@@ -164,6 +164,8 @@
    (val k-std-dscope (ref k-scope @t))
    (val k-shared-name? (subr (maxeff (read @globals) spin) (symbol) bool))
    (val k-lookup-raw (subr (maxeff (read @globals) (read @t) spin) (symbol) int))
+   (val k-shared-abs-named
+        (subr (maxeff (read @globals) (read @t) (alloc @t) (write @t) spin) (symbol) int))
    (val k-bound-since? (subr (maxeff (read @globals) (read @t) spin) (symbol int) bool))
    (val k-mark (subr (maxeff (read @globals) spin (read @t)) () int))
    (val k-rebind

@@ -154,6 +154,21 @@ fn staged_code_loads_files() {
     }
 }
 
+/// A session's steps that load files (`programs/stage/session-loads.fx`):
+/// each a module of the session's own, made as the step that first loads it
+/// is checked, a later step's load of the path the same module (its types
+/// the same), a definition's type naming its types; from the session's
+/// directory, the program's until `session-directory!` says another.
+#[test]
+fn a_sessions_steps_load_files() {
+    let want = "defined lib\n42\n4\nrefused: cannot read `loads/missing.fx`: No such file or directory (os error 2)\n9\n";
+    let runs: Vec<_> = STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run(m, "session-loads.fx")))).collect();
+    for (m, t) in runs {
+        let (status, out, err) = t.join().expect("ran");
+        assert_eq!((status, out.as_str()), (Some(0), want), "{m}: {err}");
+    }
+}
+
 /// A process stages code while another runs, at tiny time slices: the
 /// checker is not the program, and no poll in it switches to the program's
 /// tasks (`TODO.md` §187: on native code, it ran them on a machine that

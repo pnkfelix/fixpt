@@ -830,15 +830,20 @@
 (define ev-sum2 (->* (symbol symbol val) val)
   (lambda (t1 t2 v) (the val (o-sum t1 (the val (o-sum t2 v))))))
 
-;; A session's form, as text, read and parsed.
-(define ev-session-top (->* (string) top)
-  (lambda (w)
+;; A session's form, as text, read and parsed, given the files it loads
+;; (`%session-eval-loads`): its forms, the definitions of those files'
+;; modules' hidden globals before it, if it makes them.
+(define ev-session-tops (->* (val string) (listof top acyclic))
+  (lambda (s w)
     (let ((read (read-text w ev-stage-base)))
       (if (null? read)
           (efail "a session's form does not read")
-          (tagcase (extract (parse ev-keys (car read)) 1)
-            (p-err (msg a b) (efail msg))
-            (p-ok (tops) (if (null? tops) (efail "a session's form is no form") (car tops))))))))
+          (let ((parsed (begin (loads! (ev-moved-loads (%session-eval-loads (ev-host s) w)))
+                               (let ((p (extract (parse ev-keys (car read)) 1)))
+                                 (begin (loads! nil) p)))))
+            (tagcase parsed
+              (p-err (msg a b) (efail msg))
+              (p-ok (tops) (if (null? tops) (efail "a session's form is no form") tops))))))))
 
 ;; Forms `ts` run in session `s`, each in turn: the last's value.
 (define ev-session-run (->* (val (listof string acyclic)) val)
@@ -848,9 +853,14 @@
                  (lambda (ts last)
                    (if (null? ts)
                        last
-                       (let ((t (ev-session-top (car ts))))
-                         (go (cdr ts) (ev-last t (eval-top-in g t) last)))))))
+                       (go (cdr ts) (ev-session-each g (ev-session-tops s (car ts)) last))))))
         (go ts the-unit)))))
+;; Forms `ts` run in globals `g`, each in turn: the last's value, or `last`.
+(define ev-session-each (->* (vglobals (listof top acyclic) val) val)
+  (lambda (g ts last)
+    (if (null? ts)
+        last
+        (let ((t (car ts))) (ev-session-each g (cdr ts) (ev-last t (eval-top-in g t) last))))))
 
 ;; A commit's forms run in session `s`, each in turn, those that assign
 ;; keeping their globals' cells.
@@ -863,9 +873,10 @@
                  (lambda (fs)
                    (if (null? fs)
                        the-unit
-                       (let ((t (ev-session-top (extract (car fs) text))))
+                       (let* ((ts (ev-session-tops s (extract (car fs) text)))
+                              (t (car (reverse ts))))
                          (begin (if (extract (car fs) keeps) (ev-keep-names t) #u)
-                                (eval-top-in g t)
+                                (ev-session-each g ts the-unit)
                                 (go (cdr fs))))))))
         (go fs)))))
 
@@ -881,6 +892,11 @@
     ;; Where a staged `load-module`'s path is from.
     (prim! 'stage-directory!
            (lambda (xs) (begin (%stage-eval-directory! (as-str (car xs))) the-unit)))
+    ;; Where a session's loads' paths are from.
+    (prim! 'session-directory!
+           (lambda (xs)
+             (begin (%session-eval-directory! (ev-host (car xs)) (as-str (car (cdr xs))))
+                    the-unit)))
     ;; A session of module `m`.
     (prim! 'make-session
            (lambda (xs)

@@ -221,6 +221,51 @@
                  (k-shared-name? s))
              (k-narrowed-of (get k-narrowed) s (k-length st) (car st)))
             (else (k-std-type s))))))
+;; A loaded file's abstract type written as it is shown, `x.fx..t`
+;; (`k-binding-shown`), which nothing else binds: as a session's step writes
+;; a definition's type found by a trial (`sessions26.rs`). The variable the
+;; module type of a load bound now, of file `x.fx`, gives for `t`; -1 if none.
+(define k-shared-abs-named (->* (symbol) int)
+  (lambda (sym)
+    (let* ((n (symbol->string sym)) (i (k-last-dots n 0 -1)))
+      (if (< i 0)
+          -1
+          (k-shared-abs-in (get k-trail) (substring n 0 i)
+                           (string->symbol (substring n (+ i 2) (string-length n))))))))
+(define k-last-dots (->* (string int int) int)
+  (lambda (n from last)
+    (let ((i (string-search n ".." from))) (if (< i 0) last (k-last-dots n (+ i 1) i)))))
+(define k-shared-abs-in (->* (k-names string symbol) int)
+  (lambda (ss file t)
+    (cond ((null? ss) -1)
+          ((and (k-shared-name? (car ss)) (string=? (k-file-shown (symbol->string (car ss))) file))
+           (let ((v (k-abs-var-of (k-lookup-raw (car ss)) t)))
+             (if (< v 0) (k-shared-abs-in (cdr ss) file t) v)))
+          (else (k-shared-abs-in (cdr ss) file t)))))
+;; A hidden global's name, `%shared:key`, as its file is shown: after the
+;; key's last `/`.
+(define k-file-shown (->* (string) string)
+  (lambda (n)
+    (let ((i (string-search n "/" 0)))
+      (if (< i 0)
+          (if (string=? (substring n 0 8) "%shared:") (substring n 8 (string-length n)) n)
+          (k-file-shown (substring n (+ i 1) (string-length n)))))))
+;; Abstract type `t` of module type `ty`, its variable; -1 if none.
+(define k-abs-var-of (->* (int symbol) int)
+  (lambda (ty t)
+    (if (< ty 0)
+        -1
+        (tagcase (k-get (k-resolve ty))
+          (ty-module (abs ds vs)
+            (letrec ((go (subr (maxeff (read @globals) (read @t) (alloc @t) (write @t) spin)
+                               (k-parts) int)
+                       (lambda (as)
+                         (cond ((null? as) -1)
+                               ((symbol=? (extract (car as) 1) t)
+                                (k-ty-new (ty-var (extract (car as) 2))))
+                               (else (go (cdr as)))))))
+              (go abs)))
+          (else y -1)))))
 ;; The same, broken or not.
 (define k-lookup-raw (->* (symbol) int)
   (lambda (s) (let ((st (table-ref (get k-env) s nil))) (if (null? st) -1 (car st)))))

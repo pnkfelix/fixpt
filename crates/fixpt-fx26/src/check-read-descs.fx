@@ -206,7 +206,7 @@
   (lambda (sym s no)
     (if (not (null? (k-lookup-desc '%include-scope)))
         (k-ty-new (ty-select '%include sym))
-        (k-sfail (no) s))))
+        (let ((v (k-shared-abs-named sym))) (if (< v 0) (k-sfail (no) s) v)))))
 ;; The type a name stands for.
 (define k-type-named (->* (syn) int)
   (lambda (s)

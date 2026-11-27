@@ -324,6 +324,9 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // evaluator's (`fx-ast-eval`), whose own effects have no `stage`.
     ("stage-directory!", "(subr stage (string) unit)"),
     ("%stage-eval-directory!", "(subr (io fs-read) (string) unit)"),
+    ("session-directory!", "(poly ((m type) (r region)) (subr (write r) ((sessionof m r) string) unit))"),
+    ("%session-eval-loads", "(poly ((r region)) (poly ((t type)) (subr (maxeff (io fs-read) (read r) (write r)) ((arrayof t r) string) (listof (productof (1 int) (2 int) (3 string) (4 string) (5 string) (6 string)) acyclic))))"),
+    ("%session-eval-directory!", "(poly ((r region)) (poly ((t type)) (subr (write r) ((arrayof t r) string) unit)))"),
     ("make-session", "(poly ((r region)) (poly ((m type)) (subr (alloc r) (m) (sessionof m r))))"),
     ("%session-check", "(poly ((e effect) (t type)) (poly ((m type) (r region) (g type)) (subr (maxeff stage spin (read r)) ((sessionof m r) datum g) (sumof (ok (sumof (expression (subr e () t)) (definition (pending e r)))) (failed stage-failure)))))"),
     ("session-redefines", "(poly ((m type) (r region) (e effect)) (subr (read r) ((sessionof m r) (pending e r)) (sumof (fresh unit) (redefines session-redefinition))))"),

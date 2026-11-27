@@ -3316,7 +3316,14 @@ prims! {
     // expression or a definition; whether a pending one redefines, readied
     // given the decision, recorded; and, lowered (`rs-scheme-vm`), the
     // Scheme each makes, for `eval`.
-    "%fx26-make-session", 1, Some(1), simple!(|rt, a| Ok(rt.heap.vector_from(&[a[0], Value::fixnum(-1), Value::FALSE, Value::FALSE])));
+    // And its directory, none yet (the staging directory, `stage_dir`); the
+    // keys of the files whose modules it has made, none yet; and its
+    // number among the sessions made, which its files' keys are marked by
+    // (`fixpt-fx26`'s `sessions26.rs`).
+    "%fx26-make-session", 1, Some(1), simple!(|rt, a| {
+        let n = SESSIONS_MADE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Ok(rt.heap.vector_from(&[a[0], Value::fixnum(-1), Value::FALSE, Value::FALSE, Value::FALSE, Value::NULL, Value::fixnum(n as i64), Value::NULL]))
+    });
     "%fx26-session-check", 3, Some(3), reenters!(|rt, a| session_op(rt, "check", a));
     "%fx26-session-redefines", 2, Some(2), reenters!(|rt, a| session_op(rt, "redefines", a));
     "%fx26-session-ready", 3, Some(3), reenters!(|rt, a| session_op(rt, "ready", a));
@@ -3635,6 +3642,44 @@ prims! {
         rt.stage_dir = Some(dir);
         Ok(Value::UNIT)
     });
+    // A session's directory (`session-directory!`), a relative one from the
+    // one it has.
+    "%fx26-session-directory!", 2, Some(2), simple!(|rt, a| {
+        let dir = std::path::PathBuf::from(get_string(rt, a[1])?);
+        let dir = match session_dir(rt, a[0]) {
+            Some(d) if dir.is_relative() => d.join(dir),
+            _ => dir,
+        };
+        let s = rt.heap.make_string(&dir.to_string_lossy());
+        rt.heap.obj_set(a[0], SESSION_DIR, s);
+        Ok(Value::UNIT)
+    });
+    // The evaluator's (`fx-ast-eval`): the files a session's text loads, for
+    // its parser, before it runs the text.
+    "%fx26-session-eval-loads", 2, Some(2), reenters!(|rt, a| session_op(rt, "eval-loads", a));
+}
+
+/// A session's fields past those `fixpt-fx26` keeps: its directory (a
+/// string, or `#f` for the staging directory), the keys of the files whose
+/// modules it has made, and its number.
+pub const SESSION_DIR: usize = 4;
+pub const SESSION_MADE: usize = 5;
+pub const SESSION_NUMBER: usize = 6;
+/// The keys of the files whose modules the evaluator has made in it
+/// (`fx-ast-eval`, `%fx26-session-eval-loads`).
+pub const SESSION_EVAL_MADE: usize = 7;
+
+/// How many sessions have been made, each its number.
+static SESSIONS_MADE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Where a relative path session `s`'s code loads is from: its own
+/// directory, or the staging directory.
+pub fn session_dir(rt: &Runtime, s: Value) -> Option<std::path::PathBuf> {
+    let d = rt.heap.obj_ref(s, SESSION_DIR);
+    if rt.heap.is_a(d, ObjType::String) {
+        return Some(std::path::PathBuf::from(rt.heap.string_to_rust(d)));
+    }
+    rt.stage_dir.clone()
 }
 
 /// Promise states. `[state, payload]`.

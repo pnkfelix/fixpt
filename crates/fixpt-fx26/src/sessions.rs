@@ -124,6 +124,7 @@ pub fn op(rt: &mut Runtime, op: &str, a: &[Value]) -> Result<Value, String> {
     let on26 = |rt: &mut Runtime| crate::sessions26::takes(rt, a[0]);
     let out = match op {
         "lower" => lower(rt, base, a[1], a[2]),
+        "eval-loads" => Ok(crate::sessions26::eval_loads(rt, base, &text(rt, a[1]))),
         "commit-lower" => commit_lower(rt, base, a[1], a[2]),
         "check" if on26(rt) => crate::sessions26::check(rt, base, a[1], a[2]),
         "check" => check(rt, base, a[1], a[2]),
@@ -152,7 +153,7 @@ pub fn op(rt: &mut Runtime, op: &str, a: &[Value]) -> Result<Value, String> {
 }
 
 fn is_session(rt: &Runtime, s: Value) -> bool {
-    rt.heap.is_a(s, fixpt_heap::ObjType::Vector) && rt.heap.obj_len(s) == 4
+    rt.heap.is_a(s, fixpt_heap::ObjType::Vector) && rt.heap.obj_len(s) == 1 + fixpt_runtime::prim::SESSION_EVAL_MADE
 }
 
 pub(crate) fn sum(rt: &mut Runtime, tag: &str, v: Value) -> Value {
@@ -245,9 +246,13 @@ fn seeded<T>(rt: &mut Runtime, base: usize, parts: &Parts, mode: Mode, f: impl F
         rt.heap.obj_set(rt.heap.root_at(base), S_INDEX, Value::fixnum(i as i64));
         i
     };
+    // A path its code loads is from the session's directory.
+    let dir = fixpt_runtime::prim::session_dir(rt, rt.heap.root_at(base));
     Ok(SESSIONS.with(|ss| {
         let mut ss = ss.borrow_mut();
         let state = &mut ss[index];
+        state.checker.base_dir = dir;
+        state.checker.staged = true;
         let depth = bind_step_names(&mut state.checker, reps.as_ref());
         let out = f(rt, state);
         state.checker.dscope.truncate(depth);
@@ -319,6 +324,42 @@ fn tried<T>(rt: &mut Runtime, state: &mut State, w: &Wrapped, then: impl FnOnce(
     }
 }
 
+/// The modules of the files code `text` loads that the session has not
+/// made, made first, kept by its checker and lowered into its seeds, which
+/// the next code it runs begins with: so that the step after finds them
+/// made, every load of a path in the session one module, and a definition's
+/// type, found by a trial and written in its form, may name their types
+/// (`sessions26.rs`'s `make_loads`). Or the refusal.
+fn make_loads(rt: &mut Runtime, state: &mut State, text: &str) -> Result<(), Value> {
+    let mut loads: Vec<String> = Vec::new();
+    for l in crate::syn::loads_given(text, state.checker.base_dir.clone()) {
+        if l.here >= crate::syn::LOAD_BASE_STEP || state.checker.shared_loads.contains_key(&l.key) {
+            continue;
+        }
+        let input = l.key.starts_with("input:") && !crate::parse::takes_modules_at(std::path::Path::new(&l.key["input:".len()..]), &l.path);
+        let path = l.path.replace('\\', "\\\\").replace('"', "\\\"");
+        let load = format!("(let ((%loaded ({} \"{path}\"))) #u)", if input { "load-input" } else { "load-module" });
+        if !loads.contains(&load) {
+            loads.push(load);
+        }
+    }
+    if loads.is_empty() {
+        return Ok(());
+    }
+    let t = format!("(define %session-loads-{} (lambda () (begin {} #u)))", state.checker.shared_loads.len(), loads.join(" "));
+    let before = std::mem::take(&mut state.checker.hoisted);
+    let made = define(state, &t);
+    let hoisted = std::mem::replace(&mut state.checker.hoisted, before);
+    let (_, top) = made.map_err(|why| fixpt_runtime::prim::stage_failed(rt, "refused", &why, 0, 0))?;
+    for (h, _) in &hoisted {
+        let code = crate::session::lower_top(&state.checker, &mut state.globals, h);
+        state.seeds.extend(code);
+    }
+    let code = crate::session::lower_top(&state.checker, &mut state.globals, &top);
+    state.seeds.extend(code);
+    Ok(())
+}
+
 /// Whether `code` is a definition, `(define …)`.
 pub(crate) fn is_definition(rt: &Runtime, code: Value) -> bool {
     let head = if code.is_pair() { rt.heap.car(code) } else { Value::NULL };
@@ -341,6 +382,9 @@ fn lower(rt: &mut Runtime, base: usize, staged: Value, given: Value) -> Result<V
     }
     let w = step_expression(&text);
     let made = seeded(rt, base, &parts, Mode::Lowered, |rt, state| {
+        if let Err(refused) = make_loads(rt, state, &text) {
+            return Err(refused);
+        }
         let made = tried(rt, state, &w, |c, g, top, _| crate::session::lower_top(c, g, &top));
         made.map(|c| {
             let mut code = std::mem::take(&mut state.seeds);
@@ -415,6 +459,11 @@ fn check_define(rt: &mut Runtime, base: usize, against: &Parts, code: Value, tex
     let whole = Wrapped::of(String::new(), text, "\n", text, 0);
     let ty_text = ty.map(|t| write(rt, t));
     let found = seeded(rt, base, against, mode, |rt, state| {
+        if mode == Mode::Lowered
+            && let Err(refused) = make_loads(rt, state, text)
+        {
+            return Err(refused);
+        }
         let ty = match &ty_text {
             Some(t) => t.clone(),
             None => match tried(rt, state, &whole, |c, _, top, _| match top {
