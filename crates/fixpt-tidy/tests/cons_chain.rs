@@ -25,6 +25,9 @@ fn report() {
                 stack.push(p);
             } else if name.ends_with(".fx") {
                 let text = std::fs::read_to_string(&p).unwrap();
+                if fixpt_tidy::ignored(&text) {
+                    continue;
+                }
                 if let Ok(found) = cons_chains(&text, SyntaxProfile::FX26)
                     && !found.is_empty()
                 {

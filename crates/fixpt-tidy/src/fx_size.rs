@@ -10,7 +10,9 @@
 //! entry must come down as it gets better, until it goes. Some are exempt
 //! for good, each by a line `exempt PREFIX` there (the user's, 2026-09-29):
 //! benchmarks that are one file by design, and test inputs whose size is
-//! their point.
+//! their point. A file may also say so of itself, by a line `;;
+//! fixpt-tidy: ignore` in its leading comments ([`crate::ignored`]; the
+//! user's, 2026-11-27): one that is no part of the build.
 //!
 //! A test program's first line, when it says what the program gives or
 //! how it is refused (`;; => …`, `;; ! …`), may be any width (the user's,
@@ -59,7 +61,11 @@ pub fn fx_files(root: &Path) -> Vec<PathBuf> {
                 if path.file_name().is_some_and(|n| !matches!(n.to_str(), Some("target" | ".git" | ".claude" | "papers"))) {
                     stack.push(path);
                 }
-            } else if path.extension().is_some_and(|e| e == "fx") {
+            } else if path.extension().is_some_and(|e| e == "fx")
+                // Not an editor's lock on one, `.#name.fx`, which Emacs
+                // keeps, a link to nothing, while the file is open.
+                && !path.file_name().is_some_and(|n| n.to_string_lossy().starts_with(".#"))
+            {
                 out.push(path);
             }
         }

@@ -20,6 +20,20 @@
 //! That is a guess about intent, not a parse: a long printed value such as
 //! `#<closure …>` counts too, which is intended.
 
+/// Whether an FX or Scheme file asks the checks of the whole repository to
+/// pass it over (the user's, 2026-11-27): a line of its leading comment
+/// block, before its first form, that reads `fixpt-tidy: ignore` after its
+/// semicolons, a reason after it if any (`;; fixpt-tidy: ignore, a scratch
+/// file`). For a file that is no part of the build: a scratch program, a
+/// file kept only for reference. The front end's own files are checked
+/// whatever they say.
+pub fn ignored(text: &str) -> bool {
+    text.lines()
+        .map(str::trim)
+        .take_while(|l| l.is_empty() || l.starts_with(';'))
+        .any(|l| l.trim_start_matches(';').trim_start().starts_with("fixpt-tidy: ignore"))
+}
+
 pub mod cons_chain;
 pub mod fields;
 pub mod fx_size;
