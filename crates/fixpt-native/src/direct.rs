@@ -758,11 +758,33 @@ pub fn note_cached_code(heap: &Heap, codes: &[Value]) {
 thread_local! {
     /// Whether `adapt` compiles what it is given (`compile_when_adapting`).
     static COMPILE_ADAPTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    /// Each cellular word `adapt` compiled, by its reference when compiled:
-    /// the word's weak reference, and its code's, or none if the compiler
-    /// declined it. An entry is the word's only while its weak reference
-    /// still finds it there; one whose word moved or died is let go.
-    static NATIVE_OF_WORD: std::cell::RefCell<(HashMap<u64, (usize, Option<usize>)>, usize)> = std::cell::RefCell::new((HashMap::default(), 64));
+    /// Each cellular word `adapt` compiled, by its heap's serial and then
+    /// by its reference when compiled: the word's weak reference, and its
+    /// code's, or none if the compiler declined it. A weak reference's
+    /// number is good only in the heap that made it, and one thread may
+    /// make many heaps in turn (`compile-file`, a heap a file) or use two
+    /// at once (`crossing::apart`), so each heap has its own table; a dead
+    /// heap's is dropped, its numbers released with it. An entry is the
+    /// word's only while its weak reference still finds it there; one whose
+    /// word moved or died is let go.
+    static NATIVE_OF_WORD: std::cell::RefCell<HashMap<u64, NativeOfWord>> = std::cell::RefCell::new(HashMap::default());
+}
+
+/// One heap's table in `NATIVE_OF_WORD`, and its size when it is next
+/// swept of entries whose words moved or died.
+struct NativeOfWord(HashMap<u64, (usize, Option<usize>)>, usize);
+
+/// `heap`'s table in `NATIVE_OF_WORD`, made if it has none (dead heaps'
+/// tables dropped then).
+fn native_of_word<R>(heap: &Heap, f: impl FnOnce(&mut NativeOfWord) -> R) -> R {
+    NATIVE_OF_WORD.with(|t| {
+        let mut t = t.borrow_mut();
+        let serial = heap.serial();
+        if !t.contains_key(&serial) {
+            t.retain(|&s, _| Heap::serial_live(s));
+        }
+        f(t.entry(serial).or_insert_with(|| NativeOfWord(HashMap::default(), 64)))
+    })
 }
 
 /// The native code of cellular closure `f`'s word, compiled the first time
@@ -771,7 +793,7 @@ thread_local! {
 /// called), which is asked again next time.
 fn native_code_of(heap: &mut Heap, f: Value) -> Option<Value> {
     let word = heap.bloblet_slot(f, CLOSURE_WORD);
-    let known = NATIVE_OF_WORD.with(|t| t.borrow().0.get(&word.raw()).copied());
+    let known = native_of_word(heap, |t| t.0.get(&word.raw()).copied());
     match known {
         Some((w, code)) if heap.weak_get(w) == Some(word) => match code.map(|c| heap.weak_get(c)) {
             Some(Some(code)) => return Some(code),
@@ -790,22 +812,26 @@ fn native_code_of(heap: &mut Heap, f: Value) -> Option<Value> {
     }
     let code = compile_closure(heap, f).ok().map(|c| heap.bloblet_slot(c, CLOSURE_WORD));
     let entry = (heap.weak_add(word), code.map(|c| heap.weak_add(c)));
-    NATIVE_OF_WORD.with(|t| {
-        let mut t = t.borrow_mut();
+    // Entries whose words moved or died, let go now and then.
+    let stale = native_of_word(heap, |t| {
         t.0.insert(word.raw(), entry);
-        // Entries whose words moved or died, let go now and then.
-        if t.0.len() > t.1 {
-            let stale: Vec<u64> = t.0.iter().filter(|(k, (w, _))| heap.weak_get(*w).map(|v| v.raw()) != Some(**k)).map(|(k, _)| *k).collect();
-            for k in stale {
-                let (w, c) = t.0.remove(&k).expect("listed");
-                heap.weak_release(w);
-                if let Some(c) = c {
-                    heap.weak_release(c);
-                }
-            }
-            t.1 = 2 * t.0.len().max(32);
+        if t.0.len() <= t.1 {
+            return Vec::new();
         }
+        let stale: Vec<(usize, Option<usize>)> = t
+            .0
+            .extract_if(|k, (w, _)| heap.weak_get(*w).map(|v| v.raw()) != Some(*k))
+            .map(|(_, e)| e)
+            .collect();
+        t.1 = 2 * t.0.len().max(32);
+        stale
     });
+    for (w, c) in stale {
+        heap.weak_release(w);
+        if let Some(c) = c {
+            heap.weak_release(c);
+        }
+    }
     code
 }
 
@@ -817,9 +843,16 @@ pub fn compile_when_adapting(on: bool) {
     COMPILE_ADAPTED.set(on);
 }
 
+/// How many cellular words `adapt` compiled (or found the compiler
+/// declined) in `heap`, as this thread knows them: for a test that each
+/// heap's are its own.
+pub fn adapted_words_known(heap: &Heap) -> usize {
+    NATIVE_OF_WORD.with(|t| t.borrow().get(&heap.serial()).map_or(0, |t| t.0.len()))
+}
+
 /// The entry for the word at `raw`, let go.
 fn forget_word(heap: &mut Heap, raw: u64) {
-    if let Some((w, c)) = NATIVE_OF_WORD.with(|t| t.borrow_mut().0.remove(&raw)) {
+    if let Some((w, c)) = native_of_word(heap, |t| t.0.remove(&raw)) {
         heap.weak_release(w);
         if let Some(c) = c {
             heap.weak_release(c);
