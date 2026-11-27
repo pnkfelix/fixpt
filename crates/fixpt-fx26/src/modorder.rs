@@ -62,7 +62,7 @@ impl Checker {
         let (mut names, mut out): (Vec<Sym>, Vec<usize>) = (Vec::new(), Vec::new());
         for (i, item) in items.iter().enumerate() {
             if let ModItem::Val { name, ty: None, init, .. } = item
-                && self.written_module(*init, &names)
+                && self.written_module(*init, &names, &places)
                 && self.early_names_in(*init, &places).iter().all(|n| names.contains(n))
             {
                 names.push(*name);
@@ -75,18 +75,23 @@ impl Checker {
     /// Whether `e` is a module as written: a `module` (or a
     /// `load-module`'s), under any `plambda`, `proj`, `lambda` of no
     /// parameters or call of none; an earlier such item, of `early`; or a
-    /// value of one, `(with m x)`.
-    fn written_module(&self, e: ExpId, early: &[Sym]) -> bool {
+    /// value of one, `(with m x)`, or of a module bound outside the module
+    /// (none of its items, `places`: a parameter of a file's, made before
+    /// the module is, its type known), so that a module a parameter holds,
+    /// named by `import` or a `define` of its path, re-exports in turn
+    /// (Heist's `fixpt-import-from-member.md`, 2026-11-27).
+    fn written_module(&self, e: ExpId, early: &[Sym], places: &[(Sym, usize)]) -> bool {
         use crate::ast::Exp;
         match self.arena.exp_at(e) {
             Exp::Module(_) => true,
-            Exp::App { fun, args } if args.is_empty() => self.written_module(*fun, early),
-            Exp::Lambda { params, body } if params.is_empty() => self.written_module(*body, early),
-            Exp::Proj { body, .. } | Exp::PLambda { body, .. } => self.written_module(*body, early),
+            Exp::App { fun, args } if args.is_empty() => self.written_module(*fun, early, places),
+            Exp::Lambda { params, body } if params.is_empty() => self.written_module(*body, early, places),
+            Exp::Proj { body, .. } | Exp::PLambda { body, .. } => self.written_module(*body, early, places),
             // An earlier such item; a shared load (`parse_load`).
             Exp::Var(x) => early.contains(x) || self.shared_globals.contains(x),
             Exp::With { module, body } => {
-                (early.contains(module) || self.shared_globals.contains(module)) && matches!(self.arena.exp_at(*body), Exp::Var(_))
+                let outside = !places.iter().any(|(n, _)| n == module);
+                (early.contains(module) || self.shared_globals.contains(module) || outside) && matches!(self.arena.exp_at(*body), Exp::Var(_))
             }
             _ => false,
         }

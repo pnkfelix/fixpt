@@ -154,19 +154,21 @@
 ;; Whether `x` is a module as written: a `module` (or a `load-module`'s),
 ;; under any `plambda`, `proj`, `lambda` of no parameters or call of none;
 ;; an earlier such item, of `early`, or a file loaded (`k-shared-name?`); or
-;; a value of one, `(with m y)`. As
-;; the Rust checker's `written_module`.
-(define k-written-module? (->* (kx k-names) bool)
-  (lambda (x early)
+;; a value of one, `(with m y)`, or of a module bound outside the module
+;; (none of its places `ps`: a file's parameter), so that a module a
+;; parameter holds re-exports in turn. As the Rust checker's
+;; `written_module`.
+(define k-written-module? (->* (kx k-names k-places) bool)
+  (lambda (x early ps)
     (tagcase x
       (x-module (items a b abk abkr) #t)
-      (x-app (f args a b abk abkr) (and (null? args) (k-written-module? f early)))
-      (x-lambda (ps body a b abk abkr) (and (null? ps) (k-written-module? body early)))
-      (x-proj (body ds a b abk abkr) (k-written-module? body early))
-      (x-plambda (bs body a b abk abkr) (k-written-module? body early))
+      (x-app (f args a b abk abkr) (and (null? args) (k-written-module? f early ps)))
+      (x-lambda (vs body a b abk abkr) (and (null? vs) (k-written-module? body early ps)))
+      (x-proj (body ds a b abk abkr) (k-written-module? body early ps))
+      (x-plambda (bs body a b abk abkr) (k-written-module? body early ps))
       (x-var (n a b abk abkr) (or (k-has-name? early n) (k-shared-name? n)))
       (x-with (m body a b abk abkr)
-        (and (or (k-has-name? early m) (k-shared-name? m))
+        (and (or (k-has-name? early m) (k-shared-name? m) (< (k-place-of ps m) 0))
              (tagcase body (x-var (n c d cdk cdkr) #t) (else y #f))))
       (else y #f))))
 ;; The names the module (its places `ps`) defines that a module as written
@@ -188,7 +190,7 @@
         early
         (let* ((it (car items))
                (ok (and (= (extract it 1) 2) (null? (extract it 4))
-                        (k-written-module? (car (extract it 5)) early)
+                        (k-written-module? (car (extract it 5)) early ps)
                         (k-all-named? (k-early-names-in (car (extract it 5)) ps) early))))
           (k-early-from (cdr items) ps
                         (if ok (the k-names (cons (car (extract it 2)) early)) early))))))
