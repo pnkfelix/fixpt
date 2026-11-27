@@ -216,12 +216,18 @@
                       (cons (extract r 1) out)))))))))
 (define list-drop (->* (syns-a int) syns-a)
   (lambda (xs k) (if (or (= k 0) (null? xs)) xs (list-drop (cdr xs) (- k 1)))))
-;; Each label of a repeated element, the list's at `p`, onto `ls`.
+;; Each label of a repeated element, the list's at `p`, onto `ls`: one
+;; repeated in the element too, kind 2, a part repeated in a repeated part,
+;; which the signature takes and no fact names yet (`contract.rs`'s
+;; `Label::Deep`; Heist's `fixpt-nested-repetition.md`, 2026-11-27).
 (define repeated-labels (->* (fails labels steps labels syn) labels)
   (lambda (fail inner p ls t)
     (cond ((null? inner) ls)
-          ((= (extract (car inner) 2) 1)
-           (begin (fail-at fail "a repeated part in a repeated part: not yet" t) ls))
+          ((>= (extract (car inner) 2) 1)
+           (repeated-labels fail (cdr inner) p
+                            (labelled-name fail (extract (car inner) 1)
+                                           (tuple 2 p (the steps nil) 0) ls t)
+                            t))
           (else
            (repeated-labels fail (cdr inner) p
                             (labelled-name fail (extract (car inner) 1)
@@ -229,6 +235,11 @@
                                                   (extract (car inner) 5))
                                            ls t)
                             t)))))
+;; Why a fact may not name a part repeated in a repeated part (`contract.rs`'s
+;; `DEEP`).
+(define deep-said (->* (string) string)
+  (lambda (n)
+    (string-append "`" n "` is a part repeated in a repeated part, which no fact names yet")))
 ;; Label `n` (a name), of kind, paths and gives `l`, onto `ls`.
 (define labelled (->* (fails syn (tupleof int steps steps int) labels) labels)
   (lambda (fail n l ls)
@@ -400,12 +411,16 @@
                                                    "node")
                                l)
                       nil))
+              ((and (not (null? ll)) (= (extract (car ll) 2) 2))
+               (begin (fail-at fail (deep-said (syn-name l)) l) nil))
               ((or (null? ll) (= (extract (car ll) 2) 0)) (begin (fail-at fail outside l) nil))
               ((and (syn-symbol? m) (null? ml))
                (begin (fail-at fail (string-append "`" (syn-name m) "` labels no part of this "
                                                    "node")
                                m)
                       nil))
+              ((and (not (null? ml)) (= (extract (car ml) 2) 2))
+               (begin (fail-at fail (deep-said (syn-name m)) m) nil))
               ((or (null? ml) (= (extract (car ml) 2) 0)) (begin (fail-at fail outside m) nil))
               ((not (steps=? (extract (car ll) 3) (extract (car ml) 3)))
                (begin (fail-at fail (string-append "a fact under `...` names one list's "
@@ -461,6 +476,9 @@
                     (target (if (syn-symbol? m) (label-of (syn-symbol m) ls) nil)))
                (cond ((null? target)
                       (begin (fail-at fail "`(bind L … in name)`: `name` a label of this node" m)
+                             (tuple imports rib rings star elems)))
+                     ((= (extract (car target) 2) 2)
+                      (begin (fail-at fail (deep-said (syn-name m)) m)
                              (tuple imports rib rings star elems)))
                      ((= (extract (car target) 2) 1)
                       (begin (fail-at fail (string-append "a fact binding in a repeated part is "
@@ -585,6 +603,8 @@
               ((null? found)
                (begin (fail-at fail (string-append "`" name "` labels no part of this node") l)
                       none))
+              ((= (extract (car found) 2) 2)
+               (begin (fail-at fail (deep-said name) l) none))
               ((and (= (extract (car found) 2) 0) rep)
                (begin (fail-at fail (string-append "`" name "` is not repeated: named alone, not `("
                                                    name " ...)`")
@@ -738,6 +758,9 @@
              (begin (fail-at fail (string-append "`" (syn-name n) "` labels no part of this "
                                                  "signature's top")
                              n)
+                    (made-entries fail (cdr ds) ls out adds)))
+            ((= (extract (car found) 2) 2)
+             (begin (fail-at fail (deep-said (syn-name n)) n)
                     (made-entries fail (cdr ds) ls out adds)))
             ((= (extract (car found) 2) 1)
              (begin (fail-at fail (string-append "`" (syn-name n) "` is a repeated part's: `("

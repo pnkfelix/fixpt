@@ -42,7 +42,15 @@ enum Gives {
 enum Label {
     Here(Vec<bool>, Gives),
     Repeated(Vec<bool>, Vec<bool>, Gives),
+    /// A part repeated in a repeated part, `(x @ bvar k @ label ...) ...`'s
+    /// `k` (Heist's `fixpt-nested-repetition.md`, 2026-11-27): the
+    /// signature takes it, its kind each part's; no fact may name it yet,
+    /// which says so.
+    Deep,
 }
+
+/// Why a fact may not name a part repeated in a repeated part.
+const DEEP: &str = "is a part repeated in a repeated part, which no fact names yet";
 
 /// A named shape: its definition, and what it exports.
 struct Named {
@@ -213,10 +221,11 @@ impl Cx<'_> {
                             self.label(&l, Label::Here(Vec::new(), g), &mut inner)?;
                         }
                         for (name, l) in inner {
-                            let Label::Here(ep, eg) = l else {
-                                return Err(FxError::at(t.at(), "a repeated part in a repeated part: not yet"));
+                            let l = match l {
+                                Label::Here(ep, eg) => Label::Repeated(p.clone(), ep, eg),
+                                Label::Repeated(..) | Label::Deep => Label::Deep,
                             };
-                            if labels.insert(name, Label::Repeated(p.clone(), ep, eg)).is_some() {
+                            if labels.insert(name, l).is_some() {
                                 return Err(FxError::at(t.at(), format!("`{}` labels two parts", self.name(name))));
                             }
                         }
@@ -512,6 +521,7 @@ impl Cx<'_> {
             match labels.get(&n) {
                 Some(Label::Repeated(lp, ep, g)) => Ok((n, lp.clone(), ep.clone(), *g)),
                 Some(Label::Here(..)) => Err(outside(x)),
+                Some(Label::Deep) => Err(FxError::at(x.at(), format!("`{}` {DEEP}", this.name(n)))),
                 None => Err(FxError::at(x.at(), format!("`{}` labels no part of this node", this.name(n)))),
             }
         };
@@ -630,6 +640,7 @@ impl Cx<'_> {
             }
             (Label::Here(..), true) => return Err(FxError::at(at, format!("`{}` is not repeated: named alone, not `({0} ...)`", self.name(name)))),
             (Label::Repeated(..), false) => return Err(FxError::at(at, format!("`{}` is a repeated part's: `({0} ...)`, every repetition's, or a fact under `...`, each repetition's", self.name(name)))),
+            (Label::Deep, _) => return Err(FxError::at(at, format!("`{}` {DEEP}", self.name(name)))),
         };
         if gives == Gives::Nothing {
             return Err(FxError::at(at, format!("`{}` labels a part that binds nothing", self.name(name))));
@@ -742,6 +753,7 @@ impl Cx<'_> {
             let (p, g) = match labels.get(&name).cloned() {
                 Some(Label::Here(p, g)) => (p, g),
                 Some(Label::Repeated(..)) => return Err(FxError::at(n.at(), format!("`{0}` is a repeated part's: `({0} ...)`, every repetition's", self.name(name)))),
+                Some(Label::Deep) => return Err(FxError::at(n.at(), format!("`{}` {DEEP}", self.name(name)))),
                 None => return Err(FxError::at(n.at(), format!("`{}` labels no part of this signature's top", self.name(name)))),
             };
             let at = d.at();
