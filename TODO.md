@@ -9034,3 +9034,82 @@ register code 0.47 s, now 0.15 s; cellular words 1.28 s, now 0.40 s.
 Bytes alike, but register code's walk is 0.29 s: its `u8->int` a call-out
 still, which the native convention does in line (fixed-width integers in
 register code, another matter).
+
+## 311. A staged load of a file using processes: `attempt` refused (found 2026-11-26, measuring staged loads for Heist; urgent: Heist's `view.fx` cannot be staged)
+
+A staged `load-module` of a file whose code uses the scheduler's forms is
+refused where the program's own load of it is taken. Heist's `core.fx`, line
+222, `(attempt e on-failure)`: ``argument 1 is a (subr (maxeff (read ed) …)
+…), where a (subr (maxeff (read @sched) (write @sched) (alloc @sched) (alloc
+@run) (goto @run) (comefrom @run) spin) () …) is expected``. On every
+machine whose front end is the one written in FX-26; `base.fx` loads
+`core.fx`, so nothing of Heist's editor above it stages, `view.fx` among
+them.
+
+**Cause, found:** staging's own. A staged load's key is marked
+`~stageN` (a session's `~sessionN`) so that its hidden global is never the
+program's (`stage.rs`'s `staged_loads`, `sessions26.rs`'s `step_loads_by`):
+the built-in `fx26:processes.fx` too, whose hidden global is then
+`%shared:fx26:processes.fx~stage0`. The FX-26 checker knows the
+scheduler's procedures, `attempt1` and the rest, by the literal
+`%shared:fx26:processes.fx` (`check-processes.fx`'s `k-library-type`, and
+`k-library-op` beside it), and types them by their forms (`k-attempt-te`)
+only then; marked, `attempt1` is checked at its plain type, whose
+effect is the scheduler's. The Rust checker's sessions mark no key, so
+`rs-scheme-vm` is not touched; check whether its `library_type` names the
+global as literally.
+
+**Where to start:** either leave a built-in module's key unmarked (a
+`fx26:` path is the library, the same text in every load, pure; but then
+its hidden global's definition, made again by the staged code, is the
+program's own global's, so give it as made, base -1, where the program has
+it, or make it so) or have `k-library-type` and its kin take the key
+before its mark. The first keeps every other place that names a built-in
+module's global literally working, and there may be more (grep
+`%shared:fx26:`). Test: a staged load, and a session step's, of a file that
+uses `attempt`, `par` and `spawn-process`, on every staging machine
+(`fixpt-cli/tests/stage.rs`).
+
+## 312. A procedural macro in a staged load, in the native convention (found 2026-11-26, measuring staged loads for Heist; urgent: Heist's `sexp.fx` cannot be staged)
+
+A staged `load-module` of a file that defines a procedural macro and uses
+it fails on every machine of the native convention
+(`fx-regs-rsjit-nativecc`, `fx-regs-fxjit-nativecc`,
+`fx-cells-rsinterp-nativecc`): ``in `er.fx`, 4:5: `swap-args`'s
+transformer: the transformers' namespace: error: cellular word: native
+code called from code native code called``. The program's own load of the
+file takes it, and so does staging on the cellular and lowered machines.
+Heist's `sexp.fx` reaches it through `buffer.fx`, which loads
+`kit/records.fx` (`product-with`, an `er-macro-transformer`). A session
+step's `define-syntax` of a procedural macro (§186) very likely does the
+same: test it.
+
+Repro: `er.fx`, a module file,
+
+    (define-syntax swap-args
+      (macro (_ f @ expr a @ expr b @ expr) expr)
+      (er-macro-transformer
+        (lambda (form rename compare)
+          (list (car (cdr form)) (car (cdr (cdr (cdr form)))) (car (cdr (cdr form)))))))
+    (define diff (subr pure (int int) int) (lambda (a b) (- a b)))
+    (define ten int (swap-args diff 1 11))
+
+staged as `'(let ((e (load-module "er.fx"))) (with e ten))`.
+
+**Cause, as far as followed:** the error is `fixpt_native::direct::with_machine`'s,
+the thread's native machine borrowed already. Staging runs inside a
+call-out from the program's native code, which holds the machine; the
+transformer runs in phase 1's namespace, on the cellular machine
+(`phase1.rs`'s `on_cellular`), but its cellular code calls native code
+somewhere (a standard procedure's, the front end's own native code, or an
+adapter `adapt` compiled natively), which wants the machine again. A
+program's load expands its macros before any native code runs, which is
+why it is not seen there.
+
+**Where to start:** find which call reaches `with_machine` (a backtrace at
+the error, `RUST_BACKTRACE=1` with the error made a panic for the hunt).
+Then either keep phase 1's code from calling native code (as
+`on_cellular` means to: its adapters cellular, `compile_when_adapting`
+off within it), or let a native call nest (the machine's state saved and
+given back around the inner call, as `CALLED_OUT` does for call-outs). Test: the repro, staged and as a session
+step's macro, on every staging machine.
