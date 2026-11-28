@@ -930,6 +930,22 @@ impl Verifier<'_> {
             Some(self.c.unit)
         } else if self.heap.is_a(x, ObjType::Symbol) {
             Some(self.c.symbol)
+        } else if self.heap.is_utf8(x) {
+            self.base_named("utf8")
+        } else if self.heap.is_keyword(x) {
+            self.base_named("keyword")
+        } else if self.heap.is_a(x, ObjType::String) && self.heap.is_interned(x) {
+            // A quote's string, which nothing writes: `string`,
+            // `(stringof const)`.
+            Some(self.c.string)
+        } else if self.heap.is_a(x, ObjType::Bytevector) && self.heap.is_interned(x) {
+            self.base_named("bytevector")
+        } else if (x.is_pair() || self.heap.is_a(x, ObjType::Vector)) && self.heap.is_interned(x) {
+            // A quote's list or vector (`TODO.md` §316): interned, so nothing
+            // writes it and no cycle runs through it; a `datum` if every
+            // part is one's.
+            let datum = self.c.standard_datum()?;
+            self.inhabits(x, datum).then_some(datum)
         } else if x.is_bloblet() && self.heap.bloblet_kind(x) == fixpt_heap::layout::kind("cellular-closure") {
             // A closure made while compiling (a lifted procedure's): its
             // word's signature, closed over nothing.
@@ -939,6 +955,13 @@ impl Verifier<'_> {
         } else {
             None
         }
+    }
+
+    /// The base type named `name` (`Checker::base`), whatever a program
+    /// binds the name to.
+    fn base_named(&mut self, name: &str) -> Option<TyId> {
+        let sym = self.c.interner.intern(name);
+        self.c.base.get(&sym).copied()
     }
 
     /// The procedure type a word's signature gives a closure over it: a
@@ -2367,6 +2390,18 @@ impl Verifier<'_> {
             }
             "pair-car" | "pair-cdr" => {
                 let p = self.pop(s, at)?;
+                // A part of a quote's constant (`TODO.md` §316): interned, so
+                // never written, so its part now is its part when this runs;
+                // taken as the literal it is, its type the literal's.
+                if let Term::Lit(x) = p.term
+                    && x.is_pair()
+                    && self.heap.is_interned(x)
+                {
+                    let part = if name == "pair-car" { self.heap.car(x) } else { self.heap.cdr(x) };
+                    let ty = self.lit_type(part);
+                    self.push_made(s, ty, Some(Term::Lit(part)));
+                    return Ok(Some(s.clone()));
+                }
                 match self.ty_of(&p) {
                     Some(Ty::Pair(a, b, r, nil)) => {
                         if nil {

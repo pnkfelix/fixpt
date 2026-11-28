@@ -1428,6 +1428,16 @@ impl crate::check::Checker {
         out
     }
 
+    /// The standard `datum` (`check::DATUM`), whatever a program binds the
+    /// name to since.
+    pub(crate) fn standard_datum(&self) -> Option<crate::ast::TyId> {
+        let datum = self.interner.get("datum")?;
+        self.dscope[..self.standard_dscope.min(self.dscope.len())].iter().rev().find_map(|(n, d)| match d {
+            crate::parse::DScope::Rec(t) if *n == datum => Some(*t),
+            _ => None,
+        })
+    }
+
     /// The standard type abbreviations: what a module file's `.fasl` may
     /// name a type by, as the file sees them alone. So `datum`, written out
     /// at each use, is not a new recursive type each time where it is read.

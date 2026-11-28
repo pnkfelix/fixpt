@@ -9249,7 +9249,7 @@ evaluator's `show-val` writes a string's, a `utf8`'s and so a tagged
 literal's text unescaped (`\n`, `\"` written raw), where every other
 machine escapes it (as before this).
 
-## 316. The cell verifier gives a constant pair no type (found 2026-11-27, by §315's test)
+## 316. ~~The cell verifier gives a constant pair no type~~ (found 2026-11-27, by §315's test; done the same day)
 
 `(car '(a b))` in a word is left open by the verifier, "pair-car of a
 value of no known type", on any quoted list, a tagged literal's or not:
@@ -9260,6 +9260,18 @@ type `datum`); one in the word, or a `let`'s, does not. No test program
 did this before §315's `run/tagged-literals.fx`, whose `program` word is
 `typed_cells.rs`'s one known gap for it.
 
-**To do, the user's to decide:** a constant pair's type `datum`, sound
-only if the constant is one: walked, every part a datum's (cycles
-bounded), else none, as now. Then drop the gap.
+**Done, as the user decided it** (the third way of three: the constant's
+parts folded, and a type for it whole): the verifier asks the heap
+whether a constant is interned (`Heap::is_interned`, read only), which
+says it is a quote's, that nothing writes it and no cycle runs through
+it. Of one interned, `pair-car` and `pair-cdr` give the part as the
+literal it is, of its own literal type, so exact, O(1), no walk; and
+`lit_type` gives the constant whole the standard `datum` if every part
+is one's (`inhabits`), a string `string`, a bytevector `bytevector`, and
+a `utf8` and a keyword their types. Of one not interned, nothing, as
+before. Where a type is asserted, a constant was checked against it
+already (`fits`, by `inhabits`). The gap is gone; `run/quoted-parts.fx`
+takes constants apart in a word, through a `let` and a join.
+
+Not done: a constant typed more precisely than `datum` whole (its exact
+structure), which only a checker giving quotes sharper types would need.

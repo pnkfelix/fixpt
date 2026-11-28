@@ -109,6 +109,36 @@ impl Heap {
         self.intern_one(candidate)
     }
 
+    /// Whether `v` is the interned object (`intern_datum`) itself: so data
+    /// nothing will write and no cycle runs through, its parts interned
+    /// too, as a quote's constant is. Read only: by its hash in its bucket
+    /// if the table is hashed as the heap is now, else in every bucket.
+    pub fn is_interned(&self, v: Value) -> bool {
+        let Some(sym) = self.interned(TABLE) else { return false };
+        let t = self.global(self.symbol_global_slot(sym));
+        if self.obj_type(t) != Some(ObjType::Vector) {
+            return false;
+        }
+        let buckets = self.obj_ref(t, BUCKETS);
+        let len = self.obj_len(buckets);
+        let current = self.obj_ref(t, STAMP).as_fixnum() == self.collections() as i64;
+        let in_bucket = |b: usize| {
+            let mut e = self.obj_ref(buckets, b);
+            while !e.is_false() {
+                if self.weak_car(e) == Some(v) {
+                    return true;
+                }
+                e = self.weak_cdr(e);
+            }
+            false
+        };
+        if current {
+            in_bucket((self.datum_hash(v) % len as u64) as usize)
+        } else {
+            (0..len).any(in_bucket)
+        }
+    }
+
     /// `candidate`, its parts interned already: the interned object equal
     /// to it, or, if none, itself, interned from now on.
     fn intern_one(&mut self, candidate: Value) -> Value {
